@@ -218,9 +218,17 @@ public class MainActivity extends Activity {
             String savedFlock = prefs.getString("flock_" + i, defaultFlocks[i]);
             EditText flock = tableInput(savedFlock);
             flock.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
+            flock.setOnClickListener(v -> {
+                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                else recalculate();
+            });
             flock.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) selected[rowIndex].setChecked(true);
-                else prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
+                if (hasFocus) {
+                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                    else recalculate();
+                } else {
+                    prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
+                }
                 updateFieldStyle(flock, hasFocus, selected[rowIndex].isChecked());
             });
             flock.addTextChangedListener(new SimpleWatcher() {
@@ -237,8 +245,17 @@ public class MainActivity extends Activity {
             EditText qty = tableInput("");
             qty.setHint("—");
             qty.setInputType(InputType.TYPE_CLASS_NUMBER);
+            qty.setOnClickListener(v -> {
+                // Chạm trực tiếp vào ô số lượng cũng được xem là chọn flock đó.
+                // Nếu đây là flock cuối còn trống thì tính ngay phần trứng còn lại.
+                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                recalculate();
+            });
             qty.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) selected[rowIndex].setChecked(true);
+                if (hasFocus) {
+                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                    recalculate();
+                }
                 updateFieldStyle(qty, hasFocus, selected[rowIndex].isChecked());
             });
             qty.addTextChangedListener(new SimpleWatcher() {
@@ -256,9 +273,17 @@ public class MainActivity extends Activity {
             String savedRate = prefs.getString("rate_" + i, defaultRates[i]);
             EditText rate = tableInput(savedRate);
             rate.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
+            rate.setOnClickListener(v -> {
+                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                else recalculate();
+            });
             rate.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) selected[rowIndex].setChecked(true);
-                else prefs.edit().putString("rate_" + rowIndex, rate.getText().toString().trim()).apply();
+                if (hasFocus) {
+                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                    else recalculate();
+                } else {
+                    prefs.edit().putString("rate_" + rowIndex, rate.getText().toString().trim()).apply();
+                }
                 updateFieldStyle(rate, hasFocus, selected[rowIndex].isChecked());
             });
             rate.addTextChangedListener(new SimpleWatcher() {
@@ -372,8 +397,7 @@ public class MainActivity extends Activity {
             }
         }
 
-        // Quy tắc đã chốt: trong các flock được chọn, khi chỉ còn đúng 1 flock chưa nhập
-        // thì flock đó tự nhận số trứng còn lại = Trứng dự kiến - tổng các flock đã nhập.
+        // Trong các flock đang chọn: chỉ còn đúng 1 flock chưa nhập => tự lấy phần còn lại.
         if (hasPlannedEggs && blankSelected == 1 && autoCandidate >= 0) {
             long remaining = Math.max(0, plannedEggs - enteredSum);
             internalChange = true;
