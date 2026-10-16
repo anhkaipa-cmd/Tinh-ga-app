@@ -158,13 +158,19 @@ public class MainActivity extends Activity {
         input.setHintTextColor(Color.rgb(180, 194, 211));
         input.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         input.setPadding(dp(2), 0, dp(2), 0);
-        input.setInputType(InputType.TYPE_CLASS_NUMBER);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
         input.setBackgroundColor(Color.TRANSPARENT);
         card.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
         if (eggs) plannedEggsInput = input;
         else plannedDocInput = input;
 
+        input.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus) {
+                normalizeIntegerExpression(input);
+                recalculate();
+            }
+        });
         input.addTextChangedListener(new SimpleWatcher() {
             @Override
             public void afterTextChanged(Editable s) {
@@ -218,17 +224,9 @@ public class MainActivity extends Activity {
             String savedFlock = prefs.getString("flock_" + i, defaultFlocks[i]);
             EditText flock = tableInput(savedFlock);
             flock.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-            flock.setOnClickListener(v -> {
-                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
-                else recalculate();
-            });
             flock.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
-                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
-                    else recalculate();
-                } else {
-                    prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
-                }
+                if (hasFocus) selected[rowIndex].setChecked(true);
+                else prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
                 updateFieldStyle(flock, hasFocus, selected[rowIndex].isChecked());
             });
             flock.addTextChangedListener(new SimpleWatcher() {
@@ -244,16 +242,13 @@ public class MainActivity extends Activity {
 
             EditText qty = tableInput("");
             qty.setHint("—");
-            qty.setInputType(InputType.TYPE_CLASS_NUMBER);
-            qty.setOnClickListener(v -> {
-                // Chạm trực tiếp vào ô số lượng cũng được xem là chọn flock đó.
-                // Nếu đây là flock cuối còn trống thì tính ngay phần trứng còn lại.
-                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
-                recalculate();
-            });
+            qty.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
             qty.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
-                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
+                    selected[rowIndex].setChecked(true);
+                    fillRemainingIfThisIsOnlyBlank(rowIndex);
+                } else {
+                    normalizeIntegerExpression(qty);
                     recalculate();
                 }
                 updateFieldStyle(qty, hasFocus, selected[rowIndex].isChecked());
@@ -272,17 +267,13 @@ public class MainActivity extends Activity {
 
             String savedRate = prefs.getString("rate_" + i, defaultRates[i]);
             EditText rate = tableInput(savedRate);
-            rate.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-            rate.setOnClickListener(v -> {
-                if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
-                else recalculate();
-            });
+            rate.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
             rate.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
-                    if (!selected[rowIndex].isChecked()) selected[rowIndex].setChecked(true);
-                    else recalculate();
-                } else {
+                if (hasFocus) selected[rowIndex].setChecked(true);
+                else {
+                    normalizeRateExpression(rate);
                     prefs.edit().putString("rate_" + rowIndex, rate.getText().toString().trim()).apply();
+                    recalculate();
                 }
                 updateFieldStyle(rate, hasFocus, selected[rowIndex].isChecked());
             });
@@ -360,22 +351,57 @@ public class MainActivity extends Activity {
         calculate.setTextSize(20);
         calculate.setTypeface(Typeface.DEFAULT_BOLD);
         calculate.setBackground(rounded(BLUE, 17, Color.TRANSPARENT, 0));
-        calculate.setOnClickListener(v -> recalculate());
+        calculate.setOnClickListener(v -> {
+            normalizeAllCalculationFields();
+            recalculate();
+        });
         calculate.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
         return calculate;
+    }
+
+    private void fillRemainingIfThisIsOnlyBlank(int rowIndex) {
+        if (plannedEggsInput == null || !isValidExpression(plannedEggsInput)) return;
+        if (!selected[rowIndex].isChecked()) return;
+        if (!qtyInputs[rowIndex].getText().toString().trim().isEmpty()) return;
+
+        int blankCount = 0;
+        long enteredSum = 0;
+        boolean allOtherValuesValid = true;
+
+        for (int i = 0; i < 5; i++) {
+            if (!selected[i].isChecked()) continue;
+            String raw = qtyInputs[i].getText().toString().trim();
+            if (raw.isEmpty()) {
+                blankCount++;
+            } else if (isValidExpression(qtyInputs[i])) {
+                enteredSum += evaluateInteger(qtyInputs[i]);
+            } else {
+                allOtherValuesValid = false;
+            }
+        }
+
+        if (blankCount == 1 && allOtherValuesValid) {
+            long remaining = Math.max(0, evaluateInteger(plannedEggsInput) - enteredSum);
+            internalChange = true;
+            qtyInputs[rowIndex].setText(String.valueOf(remaining));
+            qtyInputs[rowIndex].setSelection(qtyInputs[rowIndex].getText().length());
+            qtyAuto[rowIndex] = true;
+            internalChange = false;
+            recalculate();
+        }
     }
 
     private void recalculate() {
         if (plannedEggsInput == null || plannedDocInput == null || totalEggsView == null) return;
 
-        long plannedEggs = parseInteger(plannedEggsInput);
-        long plannedDoc = parseInteger(plannedDocInput);
-        boolean hasPlannedEggs = !digitsOnly(plannedEggsInput.getText().toString()).isEmpty();
-        boolean hasPlannedDoc = !digitsOnly(plannedDocInput.getText().toString()).isEmpty();
+        boolean hasPlannedEggs = isValidExpression(plannedEggsInput);
+        boolean hasPlannedDoc = isValidExpression(plannedDocInput);
+        long plannedEggs = hasPlannedEggs ? evaluateInteger(plannedEggsInput) : 0;
+        long plannedDoc = hasPlannedDoc ? evaluateInteger(plannedDocInput) : 0;
 
         internalChange = true;
         for (int i = 0; i < 5; i++) {
-            if (qtyAuto[i]) {
+            if (qtyAuto[i] && !qtyInputs[i].hasFocus()) {
                 qtyInputs[i].setText("");
                 qtyAuto[i] = false;
             }
@@ -385,24 +411,25 @@ public class MainActivity extends Activity {
         int blankSelected = 0;
         int autoCandidate = -1;
         long enteredSum = 0;
+        boolean allEnteredValid = true;
 
         for (int i = 0; i < 5; i++) {
             if (selected[i] == null || !selected[i].isChecked()) continue;
-            String digits = digitsOnly(qtyInputs[i].getText().toString());
-            if (digits.isEmpty()) {
+            String raw = qtyInputs[i].getText().toString().trim();
+            if (raw.isEmpty()) {
                 blankSelected++;
                 autoCandidate = i;
+            } else if (isValidExpression(qtyInputs[i])) {
+                enteredSum += evaluateInteger(qtyInputs[i]);
             } else {
-                enteredSum += parseInteger(qtyInputs[i]);
+                allEnteredValid = false;
             }
         }
 
-        // Trong các flock đang chọn: chỉ còn đúng 1 flock chưa nhập => tự lấy phần còn lại.
-        if (hasPlannedEggs && blankSelected == 1 && autoCandidate >= 0) {
+        if (hasPlannedEggs && allEnteredValid && blankSelected == 1 && autoCandidate >= 0) {
             long remaining = Math.max(0, plannedEggs - enteredSum);
             internalChange = true;
             qtyInputs[autoCandidate].setText(String.valueOf(remaining));
-            qtyInputs[autoCandidate].setSelection(qtyInputs[autoCandidate].getText().length());
             qtyAuto[autoCandidate] = true;
             internalChange = false;
         }
@@ -417,8 +444,13 @@ public class MainActivity extends Activity {
                 continue;
             }
 
-            long qty = parseInteger(qtyInputs[i]);
-            double rate = parseRate(rateInputs[i]);
+            if (!isValidExpression(qtyInputs[i]) || !isValidExpression(rateInputs[i])) {
+                docOutputs[i].setText("—");
+                continue;
+            }
+
+            long qty = evaluateInteger(qtyInputs[i]);
+            double rate = evaluateDouble(rateInputs[i]);
             long doc = Math.round(qty * rate / 100.0);
 
             totalEggs += qty;
@@ -439,6 +471,64 @@ public class MainActivity extends Activity {
         else resetDifference(diffDocView, "Chênh lệch DOC");
 
         updateRowHighlights();
+    }
+
+    private void normalizeAllCalculationFields() {
+        normalizeIntegerExpression(plannedEggsInput);
+        normalizeIntegerExpression(plannedDocInput);
+        for (int i = 0; i < 5; i++) {
+            normalizeIntegerExpression(qtyInputs[i]);
+            normalizeRateExpression(rateInputs[i]);
+        }
+    }
+
+    private void normalizeIntegerExpression(EditText input) {
+        if (input == null) return;
+        String raw = input.getText().toString().trim();
+        if (raw.isEmpty() || !ExpressionEvaluator.isValid(raw)) return;
+        long value = Math.max(0, Math.round(ExpressionEvaluator.evaluate(raw)));
+        internalChange = true;
+        input.setText(String.valueOf(value));
+        input.setSelection(input.getText().length());
+        internalChange = false;
+    }
+
+    private void normalizeRateExpression(EditText input) {
+        if (input == null) return;
+        String raw = input.getText().toString().trim();
+        if (raw.isEmpty() || !ExpressionEvaluator.isValid(raw)) return;
+        double value = Math.max(0.0, ExpressionEvaluator.evaluate(raw));
+        String formatted = Math.abs(value - Math.rint(value)) < 1e-9
+                ? String.format(Locale.US, "%.1f", value)
+                : trimDecimal(value);
+        internalChange = true;
+        input.setText(formatted);
+        input.setSelection(input.getText().length());
+        internalChange = false;
+    }
+
+    private boolean isValidExpression(EditText input) {
+        if (input == null) return false;
+        String raw = input.getText().toString().trim();
+        return !raw.isEmpty() && ExpressionEvaluator.isValid(raw);
+    }
+
+    private long evaluateInteger(EditText input) {
+        if (!isValidExpression(input)) return 0;
+        return Math.max(0, Math.round(ExpressionEvaluator.evaluate(input.getText().toString())));
+    }
+
+    private double evaluateDouble(EditText input) {
+        if (!isValidExpression(input)) return 0.0;
+        return Math.max(0.0, ExpressionEvaluator.evaluate(input.getText().toString()));
+    }
+
+    private String trimDecimal(double value) {
+        String text = String.format(Locale.US, "%.4f", value);
+        while (text.contains(".") && (text.endsWith("0") || text.endsWith("."))) {
+            text = text.substring(0, text.length() - 1);
+        }
+        return text;
     }
 
     private void applyDifference(TextView view, String label, long diff) {
@@ -550,32 +640,6 @@ public class MainActivity extends Activity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private long parseInteger(EditText input) {
-        if (input == null) return 0;
-        String digits = digitsOnly(input.getText().toString());
-        if (digits.isEmpty()) return 0;
-        try {
-            return Long.parseLong(digits);
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
-    private double parseRate(EditText input) {
-        if (input == null) return 0.0;
-        String raw = input.getText().toString().trim().replace(',', '.');
-        if (raw.isEmpty() || raw.equals(".")) return 0.0;
-        try {
-            return Double.parseDouble(raw);
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
-    private String digitsOnly(String value) {
-        return value == null ? "" : value.replaceAll("[^0-9]", "");
     }
 
     private String formatNumber(long value) {
