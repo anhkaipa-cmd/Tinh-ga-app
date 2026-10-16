@@ -31,6 +31,9 @@ jobs:
       - name: Apply integrated calculator keypad
         run: python3 tools/patch_custom_keypad.py
 
+      - name: Fix calculator keypad runtime crash
+        run: python3 tools/fix_keypad_crash.py
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
