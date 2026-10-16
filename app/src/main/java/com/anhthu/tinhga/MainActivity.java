@@ -57,6 +57,8 @@ public class MainActivity extends Activity {
     private TextView diffEggView;
     private TextView diffDocView;
 
+    private EditText activeCalcField;
+    private LinearLayout operatorBar;
     private boolean internalChange = false;
 
     @Override
@@ -72,13 +74,17 @@ public class MainActivity extends Activity {
     }
 
     private View buildScreen() {
+        LinearLayout screen = new LinearLayout(this);
+        screen.setOrientation(LinearLayout.VERTICAL);
+        screen.setBackgroundColor(Color.rgb(248, 251, 255));
+
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(248, 251, 255));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(12), dp(12), dp(12), dp(24));
+        root.setPadding(dp(12), dp(12), dp(12), dp(14));
         scroll.addView(root, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -92,7 +98,15 @@ public class MainActivity extends Activity {
         root.addView(buildDifferences());
         root.addView(space(8));
         root.addView(buildCalculateButton());
-        return scroll;
+
+        screen.addView(scroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        operatorBar = buildOperatorBar();
+        screen.addView(operatorBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(50)));
+
+        return screen;
     }
 
     private View buildHeader() {
@@ -109,7 +123,8 @@ public class MainActivity extends Activity {
         LinearLayout titleBox = new LinearLayout(this);
         titleBox.setOrientation(LinearLayout.VERTICAL);
         titleBox.setPadding(dp(10), 0, 0, 0);
-        header.addView(titleBox, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        header.addView(titleBox, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
         titleBox.addView(text("Tính gà", 27, NAVY, true));
         titleBox.addView(text("Tính nhanh số gà nở", 13, MUTED, false));
@@ -136,6 +151,7 @@ public class MainActivity extends Activity {
         left.setMarginEnd(dp(5));
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(94), 1f);
         right.setMarginStart(dp(5));
+
         row.addView(planCard("Trứng dự kiến", true), left);
         row.addView(planCard("DOC dự kiến", false), right);
         return row;
@@ -158,19 +174,23 @@ public class MainActivity extends Activity {
         input.setHintTextColor(Color.rgb(180, 194, 211));
         input.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         input.setPadding(dp(2), 0, dp(2), 0);
-        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        setNumericKeyboard(input);
         input.setBackgroundColor(Color.TRANSPARENT);
-        card.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
+        card.addView(input, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
         if (eggs) plannedEggsInput = input;
         else plannedDocInput = input;
 
         input.setOnFocusChangeListener((v, hasFocus) -> {
-            if (!hasFocus) {
+            if (hasFocus) {
+                activeCalcField = input;
+            } else {
                 normalizeIntegerExpression(input);
                 recalculate();
             }
         });
+        input.setOnClickListener(v -> activeCalcField = input);
         input.addTextChangedListener(new SimpleWatcher() {
             @Override
             public void afterTextChanged(Editable s) {
@@ -196,10 +216,12 @@ public class MainActivity extends Activity {
         header.addView(headerCell("Số lượng\ntrứng", 1.55f));
         header.addView(headerCell("Tỷ lệ nở\n(%)", 1.25f));
         header.addView(headerCell("DOC\n(con)", 1.42f));
-        table.addView(header, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+        table.addView(header, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
 
         for (int i = 0; i < 5; i++) {
             final int rowIndex = i;
+
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -225,8 +247,14 @@ public class MainActivity extends Activity {
             EditText flock = tableInput(savedFlock);
             flock.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
             flock.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) selected[rowIndex].setChecked(true);
-                else prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
+                if (hasFocus) {
+                    selected[rowIndex].setChecked(true);
+                    activeCalcField = null;
+                } else {
+                    prefs.edit()
+                            .putString("flock_" + rowIndex, flock.getText().toString().trim())
+                            .apply();
+                }
                 updateFieldStyle(flock, hasFocus, selected[rowIndex].isChecked());
             });
             flock.addTextChangedListener(new SimpleWatcher() {
@@ -242,9 +270,10 @@ public class MainActivity extends Activity {
 
             EditText qty = tableInput("");
             qty.setHint("—");
-            qty.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            setNumericKeyboard(qty);
             qty.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
+                    activeCalcField = qty;
                     selected[rowIndex].setChecked(true);
                     fillRemainingIfThisIsOnlyBlank(rowIndex);
                 } else {
@@ -253,6 +282,7 @@ public class MainActivity extends Activity {
                 }
                 updateFieldStyle(qty, hasFocus, selected[rowIndex].isChecked());
             });
+            qty.setOnClickListener(v -> activeCalcField = qty);
             qty.addTextChangedListener(new SimpleWatcher() {
                 @Override
                 public void afterTextChanged(Editable s) {
@@ -267,16 +297,21 @@ public class MainActivity extends Activity {
 
             String savedRate = prefs.getString("rate_" + i, defaultRates[i]);
             EditText rate = tableInput(savedRate);
-            rate.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            setNumericKeyboard(rate);
             rate.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) selected[rowIndex].setChecked(true);
-                else {
+                if (hasFocus) {
+                    activeCalcField = rate;
+                    selected[rowIndex].setChecked(true);
+                } else {
                     normalizeRateExpression(rate);
-                    prefs.edit().putString("rate_" + rowIndex, rate.getText().toString().trim()).apply();
+                    prefs.edit()
+                            .putString("rate_" + rowIndex, rate.getText().toString().trim())
+                            .apply();
                     recalculate();
                 }
                 updateFieldStyle(rate, hasFocus, selected[rowIndex].isChecked());
             });
+            rate.setOnClickListener(v -> activeCalcField = rate);
             rate.addTextChangedListener(new SimpleWatcher() {
                 @Override
                 public void afterTextChanged(Editable s) {
@@ -295,7 +330,8 @@ public class MainActivity extends Activity {
             docOutputs[i] = doc;
             row.addView(doc, weighted(1.42f, dp(50)));
 
-            table.addView(row, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
+            table.addView(row, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
         }
 
         LinearLayout total = new LinearLayout(this);
@@ -314,7 +350,9 @@ public class MainActivity extends Activity {
         total.addView(totalEggsView, weighted(1.55f, dp(52)));
         total.addView(totalRateView, weighted(1.25f, dp(52)));
         total.addView(totalDocView, weighted(1.42f, dp(52)));
-        table.addView(total, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+
+        table.addView(total, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
         return table;
     }
 
@@ -330,6 +368,7 @@ public class MainActivity extends Activity {
         left.setMarginEnd(dp(5));
         LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(62), 1f);
         right.setMarginStart(dp(5));
+
         row.addView(diffEggView, left);
         row.addView(diffDocView, right);
         return row;
@@ -355,8 +394,82 @@ public class MainActivity extends Activity {
             normalizeAllCalculationFields();
             recalculate();
         });
-        calculate.setLayoutParams(new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+        calculate.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
         return calculate;
+    }
+
+    private LinearLayout buildOperatorBar() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER);
+        bar.setPadding(dp(5), dp(4), dp(5), dp(4));
+        bar.setBackground(rounded(Color.rgb(232, 238, 247), 0, BORDER, 1));
+
+        String[] labels = {"+", "−", "×", "÷", "(", ")", "="};
+        for (String label : labels) {
+            Button b = new Button(this);
+            b.setText(label);
+            b.setAllCaps(false);
+            b.setTextSize(label.equals("=") ? 18 : 20);
+            b.setTypeface(Typeface.DEFAULT_BOLD);
+            b.setTextColor(label.equals("=") ? Color.WHITE : NAVY);
+            b.setPadding(0, 0, 0, 0);
+            b.setFocusable(false);
+            b.setFocusableInTouchMode(false);
+            b.setBackground(rounded(
+                    label.equals("=") ? BLUE : Color.WHITE,
+                    10,
+                    label.equals("=") ? Color.TRANSPARENT : BORDER,
+                    label.equals("=") ? 0 : 1));
+            b.setOnClickListener(v -> handleOperator(label));
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+            lp.setMargins(dp(2), 0, dp(2), 0);
+            bar.addView(b, lp);
+        }
+        return bar;
+    }
+
+    private void handleOperator(String label) {
+        EditText field = activeCalcField;
+        if (field == null) return;
+
+        if ("=".equals(label)) {
+            if (isRateField(field)) normalizeRateExpression(field);
+            else normalizeIntegerExpression(field);
+            recalculate();
+            field.requestFocus();
+            field.setSelection(field.getText().length());
+            return;
+        }
+
+        String insert;
+        if ("−".equals(label)) insert = "-";
+        else insert = label;
+
+        Editable text = field.getText();
+        int start = Math.max(0, field.getSelectionStart());
+        int end = Math.max(0, field.getSelectionEnd());
+        int left = Math.min(start, end);
+        int right = Math.max(start, end);
+        text.replace(left, right, insert);
+        field.setSelection(left + insert.length());
+        recalculate();
+    }
+
+    private boolean isRateField(EditText field) {
+        for (EditText rate : rateInputs) {
+            if (rate == field) return true;
+        }
+        return false;
+    }
+
+    private void setNumericKeyboard(EditText input) {
+        input.setInputType(
+                InputType.TYPE_CLASS_NUMBER
+                        | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                        | InputType.TYPE_NUMBER_FLAG_SIGNED);
     }
 
     private void fillRemainingIfThisIsOnlyBlank(int rowIndex) {
@@ -461,14 +574,22 @@ public class MainActivity extends Activity {
 
         double weightedRate = totalEggs > 0 ? weightedRateNumerator / totalEggs : 0.0;
         totalEggsView.setText(formatNumber(totalEggs));
-        totalRateView.setText(totalEggs > 0 ? String.format(Locale.US, "%.1f", weightedRate) : "—");
+        totalRateView.setText(totalEggs > 0
+                ? String.format(Locale.US, "%.1f", weightedRate)
+                : "—");
         totalDocView.setText(formatNumber(totalDoc));
 
-        if (hasPlannedEggs) applyDifference(diffEggView, "Chênh lệch trứng", totalEggs - plannedEggs);
-        else resetDifference(diffEggView, "Chênh lệch trứng");
+        if (hasPlannedEggs) {
+            applyDifference(diffEggView, "Chênh lệch trứng", totalEggs - plannedEggs);
+        } else {
+            resetDifference(diffEggView, "Chênh lệch trứng");
+        }
 
-        if (hasPlannedDoc) applyDifference(diffDocView, "Chênh lệch DOC", totalDoc - plannedDoc);
-        else resetDifference(diffDocView, "Chênh lệch DOC");
+        if (hasPlannedDoc) {
+            applyDifference(diffDocView, "Chênh lệch DOC", totalDoc - plannedDoc);
+        } else {
+            resetDifference(diffDocView, "Chênh lệch DOC");
+        }
 
         updateRowHighlights();
     }
@@ -486,6 +607,7 @@ public class MainActivity extends Activity {
         if (input == null) return;
         String raw = input.getText().toString().trim();
         if (raw.isEmpty() || !ExpressionEvaluator.isValid(raw)) return;
+
         long value = Math.max(0, Math.round(ExpressionEvaluator.evaluate(raw)));
         internalChange = true;
         input.setText(String.valueOf(value));
@@ -497,10 +619,12 @@ public class MainActivity extends Activity {
         if (input == null) return;
         String raw = input.getText().toString().trim();
         if (raw.isEmpty() || !ExpressionEvaluator.isValid(raw)) return;
+
         double value = Math.max(0.0, ExpressionEvaluator.evaluate(raw));
         String formatted = Math.abs(value - Math.rint(value)) < 1e-9
                 ? String.format(Locale.US, "%.1f", value)
                 : trimDecimal(value);
+
         internalChange = true;
         input.setText(formatted);
         input.setSelection(input.getText().length());
@@ -515,12 +639,14 @@ public class MainActivity extends Activity {
 
     private long evaluateInteger(EditText input) {
         if (!isValidExpression(input)) return 0;
-        return Math.max(0, Math.round(ExpressionEvaluator.evaluate(input.getText().toString())));
+        return Math.max(0,
+                Math.round(ExpressionEvaluator.evaluate(input.getText().toString())));
     }
 
     private double evaluateDouble(EditText input) {
         if (!isValidExpression(input)) return 0.0;
-        return Math.max(0.0, ExpressionEvaluator.evaluate(input.getText().toString()));
+        return Math.max(0.0,
+                ExpressionEvaluator.evaluate(input.getText().toString()));
     }
 
     private String trimDecimal(double value) {
@@ -555,15 +681,26 @@ public class MainActivity extends Activity {
         for (int i = 0; i < 5; i++) {
             if (rowLayouts[i] == null || selected[i] == null) continue;
             boolean on = selected[i].isChecked();
-            rowLayouts[i].setBackground(rounded(on ? ROW_SELECTED : Color.TRANSPARENT, 11, Color.TRANSPARENT, 0));
-            if (flockInputs[i] != null && !flockInputs[i].hasFocus()) updateFieldStyle(flockInputs[i], false, on);
-            if (qtyInputs[i] != null && !qtyInputs[i].hasFocus()) updateFieldStyle(qtyInputs[i], false, on);
-            if (rateInputs[i] != null && !rateInputs[i].hasFocus()) updateFieldStyle(rateInputs[i], false, on);
+            rowLayouts[i].setBackground(
+                    rounded(on ? ROW_SELECTED : Color.TRANSPARENT,
+                            11, Color.TRANSPARENT, 0));
+
+            if (flockInputs[i] != null && !flockInputs[i].hasFocus()) {
+                updateFieldStyle(flockInputs[i], false, on);
+            }
+            if (qtyInputs[i] != null && !qtyInputs[i].hasFocus()) {
+                updateFieldStyle(qtyInputs[i], false, on);
+            }
+            if (rateInputs[i] != null && !rateInputs[i].hasFocus()) {
+                updateFieldStyle(rateInputs[i], false, on);
+            }
         }
     }
 
     private void updateFieldStyle(EditText input, boolean active, boolean rowSelected) {
-        int stroke = active ? BLUE : (rowSelected ? Color.rgb(171, 210, 250) : BORDER);
+        int stroke = active
+                ? BLUE
+                : (rowSelected ? Color.rgb(171, 210, 250) : BORDER);
         input.setBackground(rounded(Color.WHITE, 11, stroke, active ? 2 : 1));
     }
 
@@ -571,12 +708,15 @@ public class MainActivity extends Activity {
         internalChange = true;
         plannedEggsInput.setText("");
         plannedDocInput.setText("");
+
         for (int i = 0; i < 5; i++) {
             qtyInputs[i].setText("");
             qtyAuto[i] = false;
             selected[i].setChecked(false);
         }
+
         internalChange = false;
+        activeCalcField = null;
         recalculate();
     }
 
@@ -619,7 +759,8 @@ public class MainActivity extends Activity {
     }
 
     private LinearLayout.LayoutParams weighted(float weight, int height) {
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, height, weight);
+        LinearLayout.LayoutParams lp =
+                new LinearLayout.LayoutParams(0, height, weight);
         lp.setMargins(dp(1), 0, dp(1), 0);
         return lp;
     }
@@ -630,11 +771,18 @@ public class MainActivity extends Activity {
         return v;
     }
 
-    private GradientDrawable rounded(int fillColor, int radiusDp, int strokeColor, int strokeWidthDp) {
+    private GradientDrawable rounded(
+            int fillColor,
+            int radiusDp,
+            int strokeColor,
+            int strokeWidthDp) {
+
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(fillColor);
         drawable.setCornerRadius(dp(radiusDp));
-        if (strokeWidthDp > 0) drawable.setStroke(dp(strokeWidthDp), strokeColor);
+        if (strokeWidthDp > 0) {
+            drawable.setStroke(dp(strokeWidthDp), strokeColor);
+        }
         return drawable;
     }
 
@@ -647,7 +795,10 @@ public class MainActivity extends Activity {
     }
 
     private abstract static class SimpleWatcher implements TextWatcher {
-        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
-        @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+        @Override
+        public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+        @Override
+        public void onTextChanged(CharSequence s, int start, int before, int count) {}
     }
 }
