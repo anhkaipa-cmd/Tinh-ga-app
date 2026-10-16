@@ -34,7 +34,7 @@ replacement = r'''    private LinearLayout buildCalculatorPad() {
         pad.addView(calcKeyRow(new String[]{"4", "5", "6", "×"}));
         pad.addView(calcKeyRow(new String[]{"1", "2", "3", "−"}));
         pad.addView(calcKeyRow(new String[]{"0", ".", "⌫", "+"}));
-        pad.addView(calcKeyRow(new String[]{"(", ")", "=", "XONG"}));
+        pad.addView(calcKeyRow(new String[]{"=", "XONG"}));
         return pad;
     }
 
@@ -158,4 +158,4 @@ s = s.replace('rate.setOnClickListener(v -> showCalculatorPad(rate));',
               'rate.setOnClickListener(v -> showCalculatorPad(rate));')
 
 p.write_text(s, encoding='utf-8')
-print('patched custom keypad')
+print('patched custom keypad without parentheses keys')
