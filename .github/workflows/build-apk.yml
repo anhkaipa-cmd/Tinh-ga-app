@@ -28,6 +28,9 @@ jobs:
         with:
           gradle-version: '8.9'
 
+      - name: Apply integrated calculator keypad
+        run: python3 tools/patch_custom_keypad.py
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
