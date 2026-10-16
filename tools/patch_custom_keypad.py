@@ -4,6 +4,17 @@ import re
 p = Path('app/src/main/java/com/anhthu/tinhga/MainActivity.java')
 s = p.read_text(encoding='utf-8')
 
+# Compact the two planned-value cards to free more vertical space for the table.
+s = s.replace('new LinearLayout.LayoutParams(0, dp(94), 1f)',
+              'new LinearLayout.LayoutParams(0, dp(72), 1f)')
+s = s.replace('card.setPadding(dp(12), dp(8), dp(12), dp(8));',
+              'card.setPadding(dp(10), dp(4), dp(10), dp(4));')
+s = s.replace('card.addView(text(label, 13, NAVY, false));',
+              'card.addView(text(label, 12, NAVY, false));')
+s = s.replace('input.setTextSize(22);', 'input.setTextSize(19);')
+s = s.replace('ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));',
+              'ViewGroup.LayoutParams.MATCH_PARENT, dp(32)));', 1)
+
 s = s.replace('private LinearLayout operatorBar;', 'private LinearLayout calculatorPad;')
 
 s = s.replace(
@@ -149,13 +160,5 @@ replacement = r'''    private LinearLayout buildCalculatorPad() {
 
 s = s[:start] + replacement + s[end:]
 
-# Ensure clicking a numeric field also opens the integrated keypad.
-s = s.replace('input.setOnClickListener(v -> showCalculatorPad(input));',
-              'input.setOnClickListener(v -> showCalculatorPad(input));')
-s = s.replace('qty.setOnClickListener(v -> showCalculatorPad(qty));',
-              'qty.setOnClickListener(v -> showCalculatorPad(qty));')
-s = s.replace('rate.setOnClickListener(v -> showCalculatorPad(rate));',
-              'rate.setOnClickListener(v -> showCalculatorPad(rate));')
-
 p.write_text(s, encoding='utf-8')
-print('patched custom keypad without parentheses keys')
+print('patched compact plan cards and custom keypad')
