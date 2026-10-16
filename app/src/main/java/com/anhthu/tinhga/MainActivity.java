@@ -7,7 +7,9 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
+import android.text.TextWatcher;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
@@ -35,13 +37,6 @@ public class MainActivity extends Activity {
     private static final int ROW_SELECTED = Color.rgb(240, 248, 255);
     private static final int WARNING = Color.rgb(211, 92, 34);
 
-    private static final int KIND_NONE = 0;
-    private static final int KIND_PLAN_EGGS = 1;
-    private static final int KIND_PLAN_DOC = 2;
-    private static final int KIND_FLOCK = 3;
-    private static final int KIND_QTY = 4;
-    private static final int KIND_RATE = 5;
-
     private final String[] defaultFlocks = {"B1", "B4", "B5", "V1", "V6"};
     private final String[] defaultRates = {"73.5", "83.0", "85.5", "90.5", "91.0"};
 
@@ -54,7 +49,6 @@ public class MainActivity extends Activity {
     private final EditText[] rateInputs = new EditText[5];
     private final TextView[] docOutputs = new TextView[5];
     private final LinearLayout[] rowLayouts = new LinearLayout[5];
-    private final boolean[] qtyManual = new boolean[5];
     private final boolean[] qtyAuto = new boolean[5];
 
     private TextView totalEggsView;
@@ -62,12 +56,8 @@ public class MainActivity extends Activity {
     private TextView totalDocView;
     private TextView diffEggView;
     private TextView diffDocView;
-    private TextView keyboardHint;
 
-    private EditText activeField;
-    private int activeKind = KIND_NONE;
-    private int activeRow = -1;
-    private boolean replaceOnNextKey = false;
+    private boolean internalChange = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,8 +92,6 @@ public class MainActivity extends Activity {
         root.addView(buildDifferences());
         root.addView(space(8));
         root.addView(buildCalculateButton());
-        root.addView(space(8));
-        root.addView(buildKeyboard());
         return scroll;
     }
 
@@ -171,16 +159,18 @@ public class MainActivity extends Activity {
         input.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
         input.setPadding(dp(2), 0, dp(2), 0);
         input.setInputType(InputType.TYPE_CLASS_NUMBER);
-        input.setShowSoftInputOnFocus(false);
         input.setBackgroundColor(Color.TRANSPARENT);
-        input.setOnClickListener(v -> focusField(input, eggs ? KIND_PLAN_EGGS : KIND_PLAN_DOC, -1));
-        input.setOnFocusChangeListener((v, hasFocus) -> {
-            if (hasFocus) focusField(input, eggs ? KIND_PLAN_EGGS : KIND_PLAN_DOC, -1);
-        });
         card.addView(input, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42)));
 
         if (eggs) plannedEggsInput = input;
         else plannedDocInput = input;
+
+        input.addTextChangedListener(new SimpleWatcher() {
+            @Override
+            public void afterTextChanged(Editable s) {
+                if (!internalChange) recalculate();
+            }
+        });
         return card;
     }
 
@@ -228,14 +218,17 @@ public class MainActivity extends Activity {
             String savedFlock = prefs.getString("flock_" + i, defaultFlocks[i]);
             EditText flock = tableInput(savedFlock);
             flock.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS);
-            flock.setOnClickListener(v -> {
-                selected[rowIndex].setChecked(true);
-                focusField(flock, KIND_FLOCK, rowIndex);
-            });
             flock.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
-                    selected[rowIndex].setChecked(true);
-                    focusField(flock, KIND_FLOCK, rowIndex);
+                if (hasFocus) selected[rowIndex].setChecked(true);
+                else prefs.edit().putString("flock_" + rowIndex, flock.getText().toString().trim()).apply();
+                updateFieldStyle(flock, hasFocus, selected[rowIndex].isChecked());
+            });
+            flock.addTextChangedListener(new SimpleWatcher() {
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (!internalChange) {
+                        prefs.edit().putString("flock_" + rowIndex, s.toString().trim()).apply();
+                    }
                 }
             });
             flockInputs[i] = flock;
@@ -244,14 +237,17 @@ public class MainActivity extends Activity {
             EditText qty = tableInput("");
             qty.setHint("—");
             qty.setInputType(InputType.TYPE_CLASS_NUMBER);
-            qty.setOnClickListener(v -> {
-                selected[rowIndex].setChecked(true);
-                focusField(qty, KIND_QTY, rowIndex);
-            });
             qty.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
-                    selected[rowIndex].setChecked(true);
-                    focusField(qty, KIND_QTY, rowIndex);
+                if (hasFocus) selected[rowIndex].setChecked(true);
+                updateFieldStyle(qty, hasFocus, selected[rowIndex].isChecked());
+            });
+            qty.addTextChangedListener(new SimpleWatcher() {
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (!internalChange) {
+                        qtyAuto[rowIndex] = false;
+                        recalculate();
+                    }
                 }
             });
             qtyInputs[i] = qty;
@@ -260,14 +256,18 @@ public class MainActivity extends Activity {
             String savedRate = prefs.getString("rate_" + i, defaultRates[i]);
             EditText rate = tableInput(savedRate);
             rate.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL);
-            rate.setOnClickListener(v -> {
-                selected[rowIndex].setChecked(true);
-                focusField(rate, KIND_RATE, rowIndex);
-            });
             rate.setOnFocusChangeListener((v, hasFocus) -> {
-                if (hasFocus) {
-                    selected[rowIndex].setChecked(true);
-                    focusField(rate, KIND_RATE, rowIndex);
+                if (hasFocus) selected[rowIndex].setChecked(true);
+                else prefs.edit().putString("rate_" + rowIndex, rate.getText().toString().trim()).apply();
+                updateFieldStyle(rate, hasFocus, selected[rowIndex].isChecked());
+            });
+            rate.addTextChangedListener(new SimpleWatcher() {
+                @Override
+                public void afterTextChanged(Editable s) {
+                    if (!internalChange) {
+                        prefs.edit().putString("rate_" + rowIndex, s.toString().trim()).apply();
+                        recalculate();
+                    }
                 }
             });
             rateInputs[i] = rate;
@@ -340,189 +340,63 @@ public class MainActivity extends Activity {
         return calculate;
     }
 
-    private View buildKeyboard() {
-        LinearLayout keyboard = new LinearLayout(this);
-        keyboard.setOrientation(LinearLayout.VERTICAL);
-        keyboard.setPadding(dp(6), dp(6), dp(6), dp(6));
-        keyboard.setBackground(rounded(Color.rgb(231, 237, 245), 17, Color.TRANSPARENT, 0));
-
-        keyboardHint = text("Chạm vào ô cần nhập", 12, MUTED, false);
-        keyboardHint.setGravity(Gravity.CENTER);
-        keyboard.addView(keyboardHint, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30)));
-
-        keyboard.addView(keyRow(new String[]{"1", "2", "3", "⌫"}, new float[]{1, 1, 1, 1}));
-        keyboard.addView(keyRow(new String[]{"4", "5", "6", "B"}, new float[]{1, 1, 1, 1}));
-        keyboard.addView(keyRow(new String[]{"7", "8", "9", "V"}, new float[]{1, 1, 1, 1}));
-        keyboard.addView(keyRow(new String[]{"0", ".", "Xong"}, new float[]{2, 1, 1}));
-        return keyboard;
-    }
-
-    private View keyRow(String[] labels, float[] weights) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setWeightSum(sum(weights));
-        for (int i = 0; i < labels.length; i++) {
-            String label = labels[i];
-            Button key = new Button(this);
-            key.setText(label);
-            key.setAllCaps(false);
-            key.setTextSize(label.equals("Xong") ? 15 : 21);
-            key.setTextColor(label.equals("Xong") ? Color.WHITE : TEXT);
-            key.setTypeface(Typeface.DEFAULT_BOLD);
-            key.setPadding(0, 0, 0, 0);
-            key.setBackground(rounded(label.equals("Xong") ? BLUE : Color.WHITE, 11, Color.TRANSPARENT, 0));
-            key.setOnClickListener(v -> handleKey(label));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, dp(55), weights[i]);
-            lp.setMargins(dp(3), dp(3), dp(3), dp(3));
-            row.addView(key, lp);
-        }
-        return row;
-    }
-
-    private void focusField(EditText field, int kind, int row) {
-        activeField = field;
-        activeKind = kind;
-        activeRow = row;
-        replaceOnNextKey = true;
-        field.requestFocus();
-        field.selectAll();
-
-        if (keyboardHint != null) {
-            if (kind == KIND_PLAN_EGGS) keyboardHint.setText("Đang nhập: Trứng dự kiến");
-            else if (kind == KIND_PLAN_DOC) keyboardHint.setText("Đang nhập: DOC dự kiến");
-            else if (kind == KIND_FLOCK) keyboardHint.setText("Đang sửa Flock " + (row + 1));
-            else if (kind == KIND_QTY) keyboardHint.setText("Đang nhập số lượng Flock " + (row + 1));
-            else if (kind == KIND_RATE) keyboardHint.setText("Đang sửa tỷ lệ nở Flock " + (row + 1));
-        }
-        updateFieldStyles();
-    }
-
-    private void handleKey(String key) {
-        if (key.equals("Xong")) {
-            if (activeField != null) activeField.clearFocus();
-            activeField = null;
-            activeKind = KIND_NONE;
-            activeRow = -1;
-            replaceOnNextKey = false;
-            keyboardHint.setText("Chạm vào ô cần nhập");
-            updateFieldStyles();
-            recalculate();
-            return;
-        }
-        if (activeField == null) return;
-
-        if (key.equals("⌫")) {
-            backspaceActive();
-            afterEdit();
-            return;
-        }
-        if (!isAllowedKey(key)) return;
-
-        if (activeKind == KIND_PLAN_EGGS || activeKind == KIND_PLAN_DOC || activeKind == KIND_QTY) {
-            String digits = digitsOnly(activeField.getText().toString());
-            if (replaceOnNextKey) digits = "";
-            digits += key;
-            activeField.setText(formatDigits(digits));
-        } else {
-            String raw = activeField.getText().toString().trim();
-            if (replaceOnNextKey) raw = "";
-            if (key.equals(".") && raw.contains(".")) return;
-            raw += key;
-            if (activeKind == KIND_FLOCK) raw = raw.toUpperCase(Locale.ROOT);
-            activeField.setText(raw);
-        }
-        replaceOnNextKey = false;
-        activeField.setSelection(activeField.getText().length());
-        afterEdit();
-    }
-
-    private boolean isAllowedKey(String key) {
-        if (activeKind == KIND_FLOCK) {
-            return key.matches("[0-9]") || key.equals("B") || key.equals("V");
-        }
-        if (activeKind == KIND_RATE) {
-            return key.matches("[0-9]") || key.equals(".");
-        }
-        return key.matches("[0-9]");
-    }
-
-    private void backspaceActive() {
-        if (replaceOnNextKey) {
-            activeField.setText("");
-            replaceOnNextKey = false;
-            return;
-        }
-        if (activeKind == KIND_PLAN_EGGS || activeKind == KIND_PLAN_DOC || activeKind == KIND_QTY) {
-            String digits = digitsOnly(activeField.getText().toString());
-            if (!digits.isEmpty()) digits = digits.substring(0, digits.length() - 1);
-            activeField.setText(formatDigits(digits));
-        } else {
-            String raw = activeField.getText().toString();
-            if (!raw.isEmpty()) raw = raw.substring(0, raw.length() - 1);
-            activeField.setText(raw);
-        }
-        activeField.setSelection(activeField.getText().length());
-    }
-
-    private void afterEdit() {
-        if (activeKind == KIND_QTY && activeRow >= 0) {
-            qtyManual[activeRow] = !digitsOnly(qtyInputs[activeRow].getText().toString()).isEmpty();
-            qtyAuto[activeRow] = false;
-        }
-        if (activeKind == KIND_FLOCK && activeRow >= 0) {
-            prefs.edit().putString("flock_" + activeRow, flockInputs[activeRow].getText().toString().trim()).apply();
-        }
-        if (activeKind == KIND_RATE && activeRow >= 0) {
-            prefs.edit().putString("rate_" + activeRow, rateInputs[activeRow].getText().toString().trim()).apply();
-        }
-        recalculate();
-    }
-
     private void recalculate() {
-        if (plannedEggsInput == null || plannedDocInput == null) return;
+        if (plannedEggsInput == null || plannedDocInput == null || totalEggsView == null) return;
 
         long plannedEggs = parseInteger(plannedEggsInput);
         long plannedDoc = parseInteger(plannedDocInput);
         boolean hasPlannedEggs = !digitsOnly(plannedEggsInput.getText().toString()).isEmpty();
         boolean hasPlannedDoc = !digitsOnly(plannedDocInput.getText().toString()).isEmpty();
 
+        internalChange = true;
         for (int i = 0; i < 5; i++) {
             if (qtyAuto[i]) {
                 qtyInputs[i].setText("");
                 qtyAuto[i] = false;
             }
         }
+        internalChange = false;
 
-        int autoCandidates = 0;
-        int candidate = -1;
-        long manualSum = 0;
+        int blankSelected = 0;
+        int autoCandidate = -1;
+        long enteredSum = 0;
+
         for (int i = 0; i < 5; i++) {
             if (selected[i] == null || !selected[i].isChecked()) continue;
-            if (qtyManual[i]) {
-                manualSum += parseInteger(qtyInputs[i]);
+            String digits = digitsOnly(qtyInputs[i].getText().toString());
+            if (digits.isEmpty()) {
+                blankSelected++;
+                autoCandidate = i;
             } else {
-                autoCandidates++;
-                candidate = i;
+                enteredSum += parseInteger(qtyInputs[i]);
             }
         }
 
-        if (hasPlannedEggs && autoCandidates == 1 && candidate >= 0) {
-            long remaining = Math.max(0, plannedEggs - manualSum);
-            qtyInputs[candidate].setText(formatNumber(remaining));
-            qtyAuto[candidate] = true;
+        // Quy tắc đã chốt: trong các flock được chọn, khi chỉ còn đúng 1 flock chưa nhập
+        // thì flock đó tự nhận số trứng còn lại = Trứng dự kiến - tổng các flock đã nhập.
+        if (hasPlannedEggs && blankSelected == 1 && autoCandidate >= 0) {
+            long remaining = Math.max(0, plannedEggs - enteredSum);
+            internalChange = true;
+            qtyInputs[autoCandidate].setText(String.valueOf(remaining));
+            qtyInputs[autoCandidate].setSelection(qtyInputs[autoCandidate].getText().length());
+            qtyAuto[autoCandidate] = true;
+            internalChange = false;
         }
 
         long totalEggs = 0;
         long totalDoc = 0;
         double weightedRateNumerator = 0.0;
+
         for (int i = 0; i < 5; i++) {
             if (selected[i] == null || !selected[i].isChecked()) {
-                if (docOutputs[i] != null) docOutputs[i].setText("—");
+                docOutputs[i].setText("—");
                 continue;
             }
+
             long qty = parseInteger(qtyInputs[i]);
             double rate = parseRate(rateInputs[i]);
             long doc = Math.round(qty * rate / 100.0);
+
             totalEggs += qty;
             totalDoc += doc;
             weightedRateNumerator += qty * rate;
@@ -568,38 +442,27 @@ public class MainActivity extends Activity {
             if (rowLayouts[i] == null || selected[i] == null) continue;
             boolean on = selected[i].isChecked();
             rowLayouts[i].setBackground(rounded(on ? ROW_SELECTED : Color.TRANSPARENT, 11, Color.TRANSPARENT, 0));
-        }
-        updateFieldStyles();
-    }
-
-    private void updateFieldStyles() {
-        for (int i = 0; i < 5; i++) {
-            if (flockInputs[i] == null || qtyInputs[i] == null || rateInputs[i] == null || selected[i] == null) continue;
-            styleInput(flockInputs[i], flockInputs[i] == activeField, selected[i].isChecked());
-            styleInput(qtyInputs[i], qtyInputs[i] == activeField, selected[i].isChecked());
-            styleInput(rateInputs[i], rateInputs[i] == activeField, selected[i].isChecked());
+            if (flockInputs[i] != null && !flockInputs[i].hasFocus()) updateFieldStyle(flockInputs[i], false, on);
+            if (qtyInputs[i] != null && !qtyInputs[i].hasFocus()) updateFieldStyle(qtyInputs[i], false, on);
+            if (rateInputs[i] != null && !rateInputs[i].hasFocus()) updateFieldStyle(rateInputs[i], false, on);
         }
     }
 
-    private void styleInput(EditText input, boolean active, boolean rowSelected) {
+    private void updateFieldStyle(EditText input, boolean active, boolean rowSelected) {
         int stroke = active ? BLUE : (rowSelected ? Color.rgb(171, 210, 250) : BORDER);
         input.setBackground(rounded(Color.WHITE, 11, stroke, active ? 2 : 1));
     }
 
     private void resetDailyData() {
+        internalChange = true;
         plannedEggsInput.setText("");
         plannedDocInput.setText("");
         for (int i = 0; i < 5; i++) {
             qtyInputs[i].setText("");
-            qtyManual[i] = false;
             qtyAuto[i] = false;
             selected[i].setChecked(false);
         }
-        activeField = null;
-        activeKind = KIND_NONE;
-        activeRow = -1;
-        replaceOnNextKey = false;
-        keyboardHint.setText("Chạm vào ô cần nhập");
+        internalChange = false;
         recalculate();
     }
 
@@ -611,7 +474,6 @@ public class MainActivity extends Activity {
         input.setTextColor(TEXT);
         input.setGravity(Gravity.CENTER);
         input.setPadding(dp(3), 0, dp(3), 0);
-        input.setShowSoftInputOnFocus(false);
         input.setSelectAllOnFocus(true);
         input.setBackground(rounded(Color.WHITE, 11, BORDER, 1));
         return input;
@@ -666,12 +528,6 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private float sum(float[] values) {
-        float total = 0f;
-        for (float value : values) total += value;
-        return total;
-    }
-
     private long parseInteger(EditText input) {
         if (input == null) return 0;
         String digits = digitsOnly(input.getText().toString());
@@ -698,16 +554,12 @@ public class MainActivity extends Activity {
         return value == null ? "" : value.replaceAll("[^0-9]", "");
     }
 
-    private String formatDigits(String digits) {
-        if (digits == null || digits.isEmpty()) return "";
-        try {
-            return formatNumber(Long.parseLong(digits));
-        } catch (NumberFormatException e) {
-            return digits;
-        }
-    }
-
     private String formatNumber(long value) {
         return NumberFormat.getIntegerInstance(Locale.US).format(value);
+    }
+
+    private abstract static class SimpleWatcher implements TextWatcher {
+        @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+        @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
     }
 }
