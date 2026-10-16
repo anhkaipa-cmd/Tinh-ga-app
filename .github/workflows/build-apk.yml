@@ -34,6 +34,9 @@ jobs:
       - name: Fix calculator keypad runtime crash
         run: python3 tools/fix_keypad_crash.py
 
+      - name: Remove parentheses keys
+        run: python3 tools/remove_parentheses.py
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
