@@ -11,12 +11,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.graphics.PointF;
-import android.hardware.Sensor;
-import android.hardware.SensorEvent;
-import android.hardware.SensorEventListener;
-import android.hardware.SensorManager;
-import android.media.FaceDetector;
+import android.graphics.Rect;
 import android.media.Image;
 import android.media.ImageReader;
 import android.media.projection.MediaProjection;
@@ -32,8 +27,26 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+
+import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.face.Face;
+import com.google.mlkit.vision.face.FaceDetection;
+import com.google.mlkit.vision.face.FaceDetector;
+import com.google.mlkit.vision.face.FaceDetectorOptions;
+import com.google.mlkit.vision.objects.DetectedObject;
+import com.google.mlkit.vision.objects.ObjectDetection;
+import com.google.mlkit.vision.objects.ObjectDetector;
+import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions;
+
 import java.nio.ByteBuffer;
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Executor;
 
 public class OverlayCoachService extends Service implements SensorEventListener {
     public static final String EXTRA_RESULT_CODE = "result_code";
@@ -41,8 +54,9 @@ public class OverlayCoachService extends Service implements SensorEventListener 
 
     private static final String CHANNEL_ID = "proangle_ai_coach";
     private static final int NOTIFICATION_ID = 7702;
-    private static final int ANALYSIS_W = 320;
-    private static final int ANALYSIS_H = 640;
+    private static final int ANALYSIS_W = 480;
+    private static final float PREVIEW_TOP = 0.14f;
+    private static final float PREVIEW_BOTTOM = 0.75f;
 
     private WindowManager windowManager;
     private FrameLayout overlayRoot;
@@ -62,17 +76,38 @@ public class OverlayCoachService extends Service implements SensorEventListener 
     private Sensor accelerometer;
     private float smoothedRoll = 0f;
 
+    private FaceDetector faceDetector;
+    private ObjectDetector objectDetector;
+    private volatile boolean analysisInFlight = false;
+
     private int screenWidth;
     private int screenHeight;
     private int densityDpi;
     private long lastAnalysisMs = 0L;
     private int darkUniformFrames = 0;
 
-    private volatile float faceX = -1f;
-    private volatile float faceY = -1f;
-    private volatile float faceSize = 0f;
+    private volatile float subjectScreenX = -1f;
+    private volatile float subjectScreenY = -1f;
+    private volatile float subjectScreenW = 0f;
+    private volatile float subjectScreenH = 0f;
+    private volatile float subjectPreviewX = -1f;
+    private volatile float subjectPreviewY = -1f;
+    private volatile float subjectPreviewW = 0f;
+    private volatile float subjectPreviewH = 0f;
+    private volatile float subjectArea = 0f;
+    private volatile boolean subjectReliable = false;
+
+    private volatile float facePreviewX = -1f;
+    private volatile float facePreviewY = -1f;
+    private volatile boolean hasFace = false;
+
     private volatile float brightness = 128f;
     private volatile boolean previewBlocked = false;
+
+    private final Executor analysisExecutor = command -> {
+        Handler h = analysisHandler;
+        if (h != null) h.post(command);
+    };
 
     @Override
     public void onCreate() {
@@ -89,6 +124,19 @@ public class OverlayCoachService extends Service implements SensorEventListener 
                 sensorManager.registerListener(this, accelerometer, SensorManager.SENSOR_DELAY_GAME);
             }
         }
+
+        FaceDetectorOptions faceOptions = new FaceDetectorOptions.Builder()
+                .setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_FAST)
+                .setMinFaceSize(0.05f)
+                .build();
+        faceDetector = FaceDetection.getClient(faceOptions);
+
+        ObjectDetectorOptions objectOptions = new ObjectDetectorOptions.Builder()
+                .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+                .enableMultipleObjects()
+                .build();
+        objectDetector = ObjectDetection.getClient(objectOptions);
+
         createOverlay();
         startAnalysisThread();
     }
@@ -137,7 +185,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
         return b.setContentTitle("ProAngle AI đang hoạt động")
-                .setContentText("Đang phân tích bố cục trên Camera Vivo")
+                .setContentText("Đang xác định chủ thể trên Camera Vivo")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .build();
@@ -179,7 +227,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
                 imageReader.getSurface(),
                 null,
                 analysisHandler);
-        showGuidance("AI ĐANG TÌM CHỦ THỂ…", 42, false);
+        showGuidance("AI ĐANG KHÓA CHỦ THỂ…", 42, false);
     }
 
     private void onImageAvailable(ImageReader reader) {
@@ -188,7 +236,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
             image = reader.acquireLatestImage();
             if (image == null) return;
             long now = android.os.SystemClock.elapsedRealtime();
-            if (now - lastAnalysisMs < 450) return;
+            if (now - lastAnalysisMs < 600 || analysisInFlight) return;
             lastAnalysisMs = now;
 
             Bitmap frame = imageToBitmap(image);
@@ -218,52 +266,163 @@ public class OverlayCoachService extends Service implements SensorEventListener 
     }
 
     private void analyzeFrame(Bitmap frame) {
-        Bitmap scaled = Bitmap.createScaledBitmap(frame, ANALYSIS_W, ANALYSIS_H, true);
+        int top = Math.max(0, Math.round(frame.getHeight() * PREVIEW_TOP));
+        int bottom = Math.min(frame.getHeight(), Math.round(frame.getHeight() * PREVIEW_BOTTOM));
+        int previewHeight = Math.max(1, bottom - top);
+
+        Bitmap preview = Bitmap.createBitmap(frame, 0, top, frame.getWidth(), previewHeight);
+        int analysisH = Math.max(360, Math.round(previewHeight * (ANALYSIS_W / (float) frame.getWidth())));
+        Bitmap scaled = Bitmap.createScaledBitmap(preview, ANALYSIS_W, analysisH, true);
+        preview.recycle();
+
         brightness = measureBrightnessAndUniformity(scaled);
+        InputImage input = InputImage.fromBitmap(scaled, 0);
+        analysisInFlight = true;
 
-        Bitmap rgb565 = Bitmap.createBitmap(ANALYSIS_W, ANALYSIS_H, Bitmap.Config.RGB_565);
-        Canvas c = new Canvas(rgb565);
-        c.drawBitmap(scaled, 0, 0, null);
-        scaled.recycle();
+        objectDetector.process(input)
+                .addOnSuccessListener(analysisExecutor, objects -> runFaceDetection(input, scaled, objects, top, previewHeight))
+                .addOnFailureListener(analysisExecutor, e -> runFaceDetection(input, scaled, Collections.emptyList(), top, previewHeight));
+    }
 
-        FaceDetector detector = new FaceDetector(ANALYSIS_W, ANALYSIS_H, 3);
-        FaceDetector.Face[] faces = new FaceDetector.Face[3];
-        int count = detector.findFaces(rgb565, faces);
+    private void runFaceDetection(InputImage input, Bitmap scaled, List<DetectedObject> objects,
+                                  int previewTopPx, int previewHeightPx) {
+        faceDetector.process(input)
+                .addOnSuccessListener(analysisExecutor, faces -> {
+                    handleDetections(scaled.getWidth(), scaled.getHeight(), objects, faces,
+                            previewTopPx, previewHeightPx);
+                    scaled.recycle();
+                    analysisInFlight = false;
+                })
+                .addOnFailureListener(analysisExecutor, e -> {
+                    handleDetections(scaled.getWidth(), scaled.getHeight(), objects, Collections.emptyList(),
+                            previewTopPx, previewHeightPx);
+                    scaled.recycle();
+                    analysisInFlight = false;
+                });
+    }
 
-        float bestConfidence = -1f;
-        FaceDetector.Face best = null;
-        for (int i = 0; i < count; i++) {
-            FaceDetector.Face f = faces[i];
-            if (f != null && f.confidence() > bestConfidence) {
-                bestConfidence = f.confidence();
-                best = f;
-            }
-        }
-
-        if (best != null && bestConfidence >= 0.35f) {
-            PointF mid = new PointF();
-            best.getMidPoint(mid);
-            faceX = mid.x / ANALYSIS_W;
-            faceY = mid.y / ANALYSIS_H;
-            faceSize = Math.min(1f, (best.eyesDistance() * 4.2f) / ANALYSIS_H);
+    private void handleDetections(int w, int h, List<DetectedObject> objects, List<Face> faces,
+                                  int previewTopPx, int previewHeightPx) {
+        Rect bestFace = chooseBestFace(faces, w, h);
+        hasFace = bestFace != null;
+        if (bestFace != null) {
+            facePreviewX = clamp01(bestFace.exactCenterX() / w);
+            facePreviewY = clamp01(bestFace.exactCenterY() / h);
         } else {
-            faceX = -1f;
-            faceY = -1f;
-            faceSize = 0f;
+            facePreviewX = -1f;
+            facePreviewY = -1f;
         }
-        rgb565.recycle();
+
+        Rect bestObject = chooseBestSubject(objects, bestFace, w, h);
+        Rect drawRect = bestObject != null ? bestObject : bestFace;
+        subjectReliable = bestObject != null && isReliableSubject(bestObject, bestFace, w, h);
+
+        if (drawRect != null) {
+            subjectPreviewX = clamp01(drawRect.exactCenterX() / w);
+            subjectPreviewY = clamp01(drawRect.exactCenterY() / h);
+            subjectPreviewW = clamp01(drawRect.width() / (float) w);
+            subjectPreviewH = clamp01(drawRect.height() / (float) h);
+            subjectArea = subjectPreviewW * subjectPreviewH;
+
+            subjectScreenX = subjectPreviewX;
+            subjectScreenY = clamp01((previewTopPx + subjectPreviewY * previewHeightPx) / (float) screenHeight);
+            subjectScreenW = subjectPreviewW;
+            subjectScreenH = clamp01(subjectPreviewH * previewHeightPx / (float) screenHeight);
+        } else {
+            subjectScreenX = -1f;
+            subjectScreenY = -1f;
+            subjectScreenW = 0f;
+            subjectScreenH = 0f;
+            subjectPreviewX = -1f;
+            subjectPreviewY = -1f;
+            subjectPreviewW = 0f;
+            subjectPreviewH = 0f;
+            subjectArea = 0f;
+            subjectReliable = false;
+        }
 
         mainHandler.post(this::updateAdvice);
+    }
+
+    private Rect chooseBestFace(List<Face> faces, int w, int h) {
+        if (faces == null || faces.isEmpty()) return null;
+        Rect best = null;
+        float bestScore = -999f;
+        for (Face face : faces) {
+            Rect r = face.getBoundingBox();
+            if (r.width() <= 0 || r.height() <= 0) continue;
+            float area = r.width() * r.height() / (float) (w * h);
+            float cx = r.exactCenterX() / w;
+            float cy = r.exactCenterY() / h;
+            float centrality = 1f - (Math.abs(cx - 0.5f) * 0.65f + Math.abs(cy - 0.48f) * 0.35f);
+            float score = area * 8f + centrality;
+            if (score > bestScore) {
+                bestScore = score;
+                best = r;
+            }
+        }
+        return best;
+    }
+
+    private Rect chooseBestSubject(List<DetectedObject> objects, Rect face, int w, int h) {
+        if (objects == null || objects.isEmpty()) return null;
+        float faceCx = face != null ? face.exactCenterX() : -1f;
+        float faceCy = face != null ? face.exactCenterY() : -1f;
+        Rect best = null;
+        float bestScore = -999f;
+
+        for (DetectedObject object : objects) {
+            Rect r = object.getBoundingBox();
+            if (r.width() <= 0 || r.height() <= 0) continue;
+            float area = r.width() * r.height() / (float) (w * h);
+            if (area < 0.012f || area > 0.93f) continue;
+
+            float cx = r.exactCenterX() / w;
+            float cy = r.exactCenterY() / h;
+            float centerScore = 1f - (Math.abs(cx - 0.5f) * 0.7f + Math.abs(cy - 0.5f) * 0.3f);
+            float sizeScore = Math.min(area, 0.42f) * 3.2f;
+            float score = centerScore + sizeScore;
+
+            if (face != null) {
+                if (containsWithMargin(r, faceCx, faceCy, w * 0.03f, h * 0.03f)) {
+                    score += 3.5f;
+                    float objectToFaceArea = area / Math.max(0.001f,
+                            face.width() * face.height() / (float) (w * h));
+                    if (objectToFaceArea > 2.0f) score += 0.7f;
+                } else {
+                    float dx = (r.exactCenterX() - faceCx) / w;
+                    float dy = (r.exactCenterY() - faceCy) / h;
+                    score -= (float) Math.sqrt(dx * dx + dy * dy) * 3.0f;
+                }
+            }
+
+            if (area > 0.72f) score -= 1.6f;
+            if (score > bestScore) {
+                bestScore = score;
+                best = r;
+            }
+        }
+        return best;
+    }
+
+    private boolean containsWithMargin(Rect r, float x, float y, float mx, float my) {
+        return x >= r.left - mx && x <= r.right + mx && y >= r.top - my && y <= r.bottom + my;
+    }
+
+    private boolean isReliableSubject(Rect subject, Rect face, int w, int h) {
+        float area = subject.width() * subject.height() / (float) (w * h);
+        if (area < 0.025f || area > 0.82f) return false;
+        if (face == null) return area >= 0.05f;
+        return containsWithMargin(subject, face.exactCenterX(), face.exactCenterY(),
+                w * 0.025f, h * 0.025f);
     }
 
     private float measureBrightnessAndUniformity(Bitmap b) {
         long sum = 0;
         long sumSq = 0;
         int n = 0;
-        int startY = ANALYSIS_H / 5;
-        int endY = ANALYSIS_H * 4 / 5;
-        for (int y = startY; y < endY; y += 20) {
-            for (int x = 20; x < ANALYSIS_W - 20; x += 20) {
+        for (int y = 20; y < b.getHeight() - 20; y += 24) {
+            for (int x = 20; x < b.getWidth() - 20; x += 24) {
                 int color = b.getPixel(x, y);
                 int lum = (Color.red(color) * 30 + Color.green(color) * 59 + Color.blue(color) * 11) / 100;
                 sum += lum;
@@ -274,11 +433,8 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         if (n == 0) return 0f;
         float mean = sum / (float) n;
         float variance = sumSq / (float) n - mean * mean;
-        if (mean < 7f && variance < 8f) {
-            darkUniformFrames++;
-        } else {
-            darkUniformFrames = 0;
-        }
+        if (mean < 7f && variance < 8f) darkUniformFrames++;
+        else darkUniformFrames = 0;
         previewBlocked = darkUniformFrames >= 5;
         return mean;
     }
@@ -286,13 +442,14 @@ public class OverlayCoachService extends Service implements SensorEventListener 
     private void updateAdvice() {
         if (previewBlocked) {
             showGuidance("KHÔNG ĐỌC ĐƯỢC PREVIEW VIVO", 0, true);
-            coachView.setState(-1f, -1f, 0f, smoothedRoll, 0, true);
+            coachView.setState(-1f, -1f, 0f, 0f, false, smoothedRoll, 0, true);
             return;
         }
 
         Advice a = evaluateAdvice();
         showGuidance(a.text, a.score, false);
-        coachView.setState(faceX, faceY, faceSize, smoothedRoll, a.score, false);
+        coachView.setState(subjectScreenX, subjectScreenY, subjectScreenW, subjectScreenH,
+                subjectReliable, smoothedRoll, a.score, false);
     }
 
     private Advice evaluateAdvice() {
@@ -306,39 +463,49 @@ public class OverlayCoachService extends Service implements SensorEventListener 
             return new Advice(55, "THIẾU SÁNG • XOAY VỀ PHÍA NGUỒN SÁNG");
         }
 
-        if (faceX < 0f) {
+        if (subjectPreviewX < 0f) {
             return new Advice(48, "LIA MÁY CHẬM • AI ĐANG TÌM CHỦ THỂ");
         }
 
-        if (faceSize < 0.16f) {
-            return new Advice(67, "TIẾN GẦN HƠN • HOẶC THỬ 2×");
+        if (!subjectReliable) {
+            if (hasFace) {
+                return new Advice(58, "THẤY MẶT • CHƯA KHÓA CHẮC CẢ NGƯỜI");
+            }
+            return new Advice(55, "GIỮ KHOẢNG CÁCH • AI ĐANG XÁC ĐỊNH CHỦ THỂ");
         }
-        if (faceSize > 0.46f) {
+
+        if (subjectArea < 0.045f && Math.max(subjectPreviewW, subjectPreviewH) < 0.42f) {
+            return new Advice(68, "TIẾN GẦN NHẸ • CHỦ THỂ CÒN NHỎ");
+        }
+        if (subjectArea > 0.62f || subjectPreviewW > 0.92f || subjectPreviewH > 0.90f) {
             return new Advice(70, "LÙI LẠI MỘT CHÚT • CHỪA KHÔNG GIAN");
         }
 
-        float targetX = faceX < 0.5f ? 0.333f : 0.667f;
-        float dx = faceX - targetX;
-        float dy = faceY - 0.34f;
+        boolean horizontalSubject = subjectPreviewW > subjectPreviewH * 1.15f;
+        float focusX = hasFace ? facePreviewX : subjectPreviewX;
+        float focusY = hasFace ? facePreviewY : subjectPreviewY;
+        float targetX = focusX < 0.5f ? 0.333f : 0.667f;
+        float targetY = hasFace ? (horizontalSubject ? 0.46f : 0.34f) : 0.50f;
+        float dx = focusX - targetX;
+        float dy = focusY - targetY;
 
-        if (Math.abs(dx) > 0.085f) {
-            if (dx < 0) {
-                return new Advice(76, "XOAY MÁY SANG TRÁI MỘT CHÚT");
-            } else {
-                return new Advice(76, "XOAY MÁY SANG PHẢI MỘT CHÚT");
-            }
+        if (Math.abs(dx) > 0.10f) {
+            return new Advice(76, dx < 0
+                    ? "XOAY MÁY SANG TRÁI MỘT CHÚT"
+                    : "XOAY MÁY SANG PHẢI MỘT CHÚT");
         }
 
-        if (Math.abs(dy) > 0.075f) {
-            if (dy < 0) {
-                return new Advice(80, "NÂNG GÓC MÁY LÊN MỘT CHÚT");
-            } else {
-                return new Advice(80, "HẠ GÓC MÁY XUỐNG MỘT CHÚT");
-            }
+        if (Math.abs(dy) > (horizontalSubject ? 0.12f : 0.09f)) {
+            return new Advice(80, dy < 0
+                    ? "NÂNG GÓC MÁY LÊN MỘT CHÚT"
+                    : "HẠ GÓC MÁY XUỐNG MỘT CHÚT");
         }
 
-        int score = Math.min(98, Math.round(93f - Math.abs(dx) * 25f - Math.abs(dy) * 18f));
-        return new Advice(score, "✓ GÓC ĐẸP • GIỮ MÁY • CHỤP");
+        int score = Math.min(98, Math.round(94f
+                - Math.abs(dx) * 24f
+                - Math.abs(dy) * 18f
+                - Math.abs(smoothedRoll) * 1.2f));
+        return new Advice(score, "✓ ĐÃ KHÓA CHỦ THỂ • GIỮ MÁY • CHỤP");
     }
 
     private void createOverlay() {
@@ -353,12 +520,12 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         guidance = new TextView(this);
         guidance.setText("AI ĐANG KHỞI ĐỘNG…");
         guidance.setTextColor(Color.WHITE);
-        guidance.setTextSize(17f);
+        guidance.setTextSize(16f);
         guidance.setGravity(Gravity.CENTER);
-        guidance.setPadding(dp(16), dp(10), dp(16), dp(10));
-        guidance.setBackgroundColor(Color.argb(190, 0, 0, 0));
+        guidance.setPadding(dp(12), dp(8), dp(12), dp(8));
+        guidance.setBackgroundColor(Color.argb(185, 0, 0, 0));
         FrameLayout.LayoutParams gp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, dp(58));
+                FrameLayout.LayoutParams.MATCH_PARENT, dp(54));
         gp.gravity = Gravity.TOP;
         gp.setMargins(dp(18), dp(48), dp(18), 0);
         overlayRoot.addView(guidance, gp);
@@ -368,7 +535,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         scoreView.setTextColor(Color.rgb(95, 255, 120));
         scoreView.setTextSize(18f);
         scoreView.setGravity(Gravity.CENTER);
-        scoreView.setBackgroundColor(Color.argb(185, 0, 0, 0));
+        scoreView.setBackgroundColor(Color.argb(180, 0, 0, 0));
         FrameLayout.LayoutParams sp = new FrameLayout.LayoutParams(dp(58), dp(58));
         sp.gravity = Gravity.LEFT | Gravity.CENTER_VERTICAL;
         sp.setMargins(dp(12), 0, 0, 0);
@@ -379,7 +546,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         closeView.setTextColor(Color.WHITE);
         closeView.setTextSize(26f);
         closeView.setGravity(Gravity.CENTER);
-        closeView.setBackgroundColor(Color.argb(175, 0, 0, 0));
+        closeView.setBackgroundColor(Color.argb(165, 0, 0, 0));
         closeView.setOnClickListener(v -> stopSelf());
         FrameLayout.LayoutParams cp = new FrameLayout.LayoutParams(dp(44), dp(44));
         cp.gravity = Gravity.TOP | Gravity.RIGHT;
@@ -422,7 +589,8 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         if (roll < -45f) roll = -45f;
         smoothedRoll = 0.88f * smoothedRoll + 0.12f * roll;
         if (coachView != null) {
-            coachView.setState(faceX, faceY, faceSize, smoothedRoll,
+            coachView.setState(subjectScreenX, subjectScreenY, subjectScreenW, subjectScreenH,
+                    subjectReliable, smoothedRoll,
                     scoreView != null ? parseScore(scoreView.getText().toString()) : 0,
                     previewBlocked);
         }
@@ -430,6 +598,10 @@ public class OverlayCoachService extends Service implements SensorEventListener 
 
     private int parseScore(String s) {
         try { return Integer.parseInt(s); } catch (Exception ignored) { return 0; }
+    }
+
+    private float clamp01(float v) {
+        return Math.max(0f, Math.min(1f, v));
     }
 
     @Override public void onAccuracyChanged(Sensor sensor, int accuracy) { }
@@ -450,6 +622,14 @@ public class OverlayCoachService extends Service implements SensorEventListener 
             try { mediaProjection.stop(); } catch (Exception ignored) { }
             mediaProjection = null;
         }
+        if (faceDetector != null) {
+            try { faceDetector.close(); } catch (Exception ignored) { }
+            faceDetector = null;
+        }
+        if (objectDetector != null) {
+            try { objectDetector.close(); } catch (Exception ignored) { }
+            objectDetector = null;
+        }
         if (overlayRoot != null && windowManager != null) {
             try { windowManager.removeView(overlayRoot); } catch (Exception ignored) { }
             overlayRoot = null;
@@ -457,6 +637,7 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         if (analysisThread != null) {
             analysisThread.quitSafely();
             analysisThread = null;
+            analysisHandler = null;
         }
         super.onDestroy();
     }
@@ -480,27 +661,35 @@ public class OverlayCoachService extends Service implements SensorEventListener 
         private final Paint gridPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint accentPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint dimPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private float faceX = -1f;
-        private float faceY = -1f;
-        private float faceSize = 0f;
+        private final Paint textPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private float subjectX = -1f;
+        private float subjectY = -1f;
+        private float subjectW = 0f;
+        private float subjectH = 0f;
+        private boolean reliable = false;
         private float roll = 0f;
         private int score = 0;
         private boolean blocked = false;
 
         CoachView(Context context) {
             super(context);
-            gridPaint.setColor(Color.argb(60, 255, 255, 255));
+            gridPaint.setColor(Color.argb(55, 255, 255, 255));
             gridPaint.setStrokeWidth(dp(context, 1));
             accentPaint.setStyle(Paint.Style.STROKE);
             accentPaint.setStrokeWidth(dp(context, 2.4f));
-            dimPaint.setColor(Color.argb(95, 255, 255, 255));
+            dimPaint.setColor(Color.argb(100, 255, 255, 255));
             dimPaint.setStrokeWidth(dp(context, 1));
+            textPaint.setTextSize(dp(context, 11));
+            textPaint.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
         }
 
-        void setState(float fx, float fy, float fs, float roll, int score, boolean blocked) {
-            this.faceX = fx;
-            this.faceY = fy;
-            this.faceSize = fs;
+        void setState(float sx, float sy, float sw, float sh, boolean reliable,
+                      float roll, int score, boolean blocked) {
+            this.subjectX = sx;
+            this.subjectY = sy;
+            this.subjectW = sw;
+            this.subjectH = sh;
+            this.reliable = reliable;
             this.roll = roll;
             this.score = score;
             this.blocked = blocked;
@@ -512,14 +701,17 @@ public class OverlayCoachService extends Service implements SensorEventListener 
             super.onDraw(c);
             float w = getWidth();
             float h = getHeight();
+            float previewTop = h * PREVIEW_TOP;
+            float previewBottom = h * PREVIEW_BOTTOM;
+            float previewH = previewBottom - previewTop;
 
-            c.drawLine(w / 3f, 0, w / 3f, h, gridPaint);
-            c.drawLine(2f * w / 3f, 0, 2f * w / 3f, h, gridPaint);
-            c.drawLine(0, h / 3f, w, h / 3f, gridPaint);
-            c.drawLine(0, 2f * h / 3f, w, 2f * h / 3f, gridPaint);
+            c.drawLine(w / 3f, previewTop, w / 3f, previewBottom, gridPaint);
+            c.drawLine(2f * w / 3f, previewTop, 2f * w / 3f, previewBottom, gridPaint);
+            c.drawLine(0, previewTop + previewH / 3f, w, previewTop + previewH / 3f, gridPaint);
+            c.drawLine(0, previewTop + 2f * previewH / 3f, w, previewTop + 2f * previewH / 3f, gridPaint);
 
             float cx = w / 2f;
-            float cy = h * 0.61f;
+            float cy = previewTop + previewH * 0.68f;
             accentPaint.setColor(score >= 90 ? Color.rgb(95, 255, 120) : Color.WHITE);
             c.save();
             c.rotate(roll, cx, cy);
@@ -527,14 +719,25 @@ public class OverlayCoachService extends Service implements SensorEventListener 
             c.restore();
             c.drawLine(cx - dp(getContext(), 76), cy, cx + dp(getContext(), 76), cy, dimPaint);
 
-            if (faceX >= 0f && !blocked) {
-                float boxW = Math.max(dp(getContext(), 80), faceSize * h * 0.72f);
-                float boxH = Math.max(dp(getContext(), 110), faceSize * h);
-                float x = faceX * w;
-                float y = faceY * h;
-                accentPaint.setColor(score >= 90 ? Color.rgb(95, 255, 120) : Color.rgb(255, 225, 90));
-                c.drawRoundRect(x - boxW / 2f, y - boxH / 2f, x + boxW / 2f, y + boxH / 2f,
+            if (subjectX >= 0f && !blocked) {
+                float x = subjectX * w;
+                float y = subjectY * h;
+                float boxW = Math.max(dp(getContext(), 56), subjectW * w);
+                float boxH = Math.max(dp(getContext(), 56), subjectH * h);
+                int color = reliable
+                        ? (score >= 90 ? Color.rgb(95, 255, 120) : Color.rgb(255, 225, 90))
+                        : Color.rgb(255, 170, 65);
+                accentPaint.setColor(color);
+                c.drawRoundRect(x - boxW / 2f, y - boxH / 2f,
+                        x + boxW / 2f, y + boxH / 2f,
                         dp(getContext(), 14), dp(getContext(), 14), accentPaint);
+
+                textPaint.setColor(color);
+                textPaint.setTextAlign(Paint.Align.LEFT);
+                c.drawText(reliable ? "CHỦ THỂ" : "CHƯA CHẮC",
+                        Math.max(dp(getContext(), 6), x - boxW / 2f),
+                        Math.max(previewTop + dp(getContext(), 14), y - boxH / 2f - dp(getContext(), 6)),
+                        textPaint);
             }
         }
 
