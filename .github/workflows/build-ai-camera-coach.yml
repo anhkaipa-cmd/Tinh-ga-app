@@ -40,11 +40,71 @@ jobs:
         working-directory: AI_CAMERA_COACH
         run: |
           sed -i 's/import android.view.SurfaceTexture;/import android.graphics.SurfaceTexture;/' app/src/main/java/com/proangle/ai/MainActivity.java
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('app/src/main/java/com/proangle/ai/OverlayCoachService.java')
+          s = p.read_text()
+          old = '''    @Override
+              public void onSensorChanged(SensorEvent event) {
+                  if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
+                  float roll = (float) Math.toDegrees(Math.atan2(-event.values[0], event.values[1]));
+                  if (roll > 45f) roll = 45f;
+                  if (roll < -45f) roll = -45f;
+                  smoothedRoll = 0.88f * smoothedRoll + 0.12f * roll;
+                  if (coachView != null) {
+                      coachView.setState(subjectScreenX, subjectScreenY, subjectScreenW, subjectScreenH,
+                              subjectReliable, smoothedRoll,
+                              scoreView != null ? parseScore(scoreView.getText().toString()) : 0,
+                              previewBlocked);
+                  }
+              }
+          '''
+          new = '''    @Override
+              public void onSensorChanged(SensorEvent event) {
+                  if (event.sensor.getType() != Sensor.TYPE_ACCELEROMETER) return;
+
+                  // Raw angle relative to portrait. A perfectly level phone can be held at
+                  // 0, 90, 180 or 270 degrees. Snap to the nearest right angle first, then
+                  // only treat the small residual as "tilt". This fixes Vivo Camera when
+                  // its UI remains portrait while the user physically holds the phone landscape.
+                  float raw = (float) Math.toDegrees(Math.atan2(-event.values[0], event.values[1]));
+                  float nearestRightAngle = Math.round(raw / 90f) * 90f;
+                  float levelError = raw - nearestRightAngle;
+                  while (levelError > 45f) levelError -= 90f;
+                  while (levelError < -45f) levelError += 90f;
+
+                  // Avoid carrying the old portrait error across a 90-degree rotation.
+                  if (Math.abs(levelError - smoothedRoll) > 28f) {
+                      smoothedRoll = levelError;
+                  } else {
+                      smoothedRoll = 0.82f * smoothedRoll + 0.18f * levelError;
+                  }
+
+                  if (coachView != null) {
+                      coachView.setState(subjectScreenX, subjectScreenY, subjectScreenW, subjectScreenH,
+                              subjectReliable, smoothedRoll,
+                              scoreView != null ? parseScore(scoreView.getText().toString()) : 0,
+                              previewBlocked);
+                  }
+              }
+          '''
+          if old not in s:
+              raise SystemExit('Landscape sensor patch target not found')
+          s = s.replace(old, new)
+          p.write_text(s)
+
+          g = Path('app/build.gradle')
+          t = g.read_text()
+          t = t.replace("versionCode 1", "versionCode 4")
+          t = t.replace("versionName '0.1.0'", "versionName '0.4.0'")
+          g.write_text(t)
+          PY
           gradle :app:assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ProAngle-AI-Camera-Coach-APK
+          name: ProAngle-AI-Camera-Coach-v0.4-APK
           path: AI_CAMERA_COACH/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
