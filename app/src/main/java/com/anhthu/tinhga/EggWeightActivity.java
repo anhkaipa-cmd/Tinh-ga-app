@@ -2,6 +2,7 @@ package com.anhthu.tinhga;
 
 import android.app.Activity;
 import android.app.DatePickerDialog;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -19,6 +20,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.NumberPicker;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -46,8 +48,11 @@ public class EggWeightActivity extends Activity {
     private final TextView[] dayDateTexts=new TextView[3];
     private final TextView[] dayStatusTexts=new TextView[3];
     private final LinearLayout[] dayContainers=new LinearLayout[3];
-    private TextView hatchText, incubationText, overallStatus;
-    private Button exportButton;
+    private final TextView[] dayHeadingTexts=new TextView[3];
+    private final View[] dayCards=new View[3];
+    private TextView hatchText, incubationText, overallStatus, machineCountView;
+    private Button exportButton, thirdDayToggle;
+    private int machineCount, visibleDayCount;
 
     private static class WeightRow {
         final String id;
@@ -64,6 +69,20 @@ public class EggWeightActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
         store=getSharedPreferences("tinh_ga_can_trung",MODE_PRIVATE);
         for (int i=0; i<3; i++) rows[i]=new ArrayList<>();
+        visibleDayCount=store.getInt("visible_days",
+            store.getLong("production_2",0)>0?3:2);
+        visibleDayCount=visibleDayCount==3?3:2;
+        machineCount=store.getInt("machine_count",0);
+        if(machineCount<1) {
+            machineCount=1;
+            for(int day=0;day<3;day++) {
+                String ids=store.getString("ids_"+day,"0");
+                if(ids!=null&&!ids.trim().isEmpty()) {
+                    machineCount=Math.max(machineCount,ids.split(",").length);
+                }
+            }
+        }
+        machineCount=Math.max(1,Math.min(30,machineCount));
         setContentView(buildScreen());
         refresh();
     }
@@ -86,15 +105,36 @@ public class EggWeightActivity extends Activity {
         root.addView(space(12));
         root.addView(incubationCard());
         root.addView(space(8));
+        root.addView(machineConfigCard());
+        root.addView(space(8));
 
-        TextView guide=label("Nhập 3 ngày sản xuất khác nhau. Mỗi nhà cân 3 vị trí: Trên, Giữa, Dưới.",13,GREY,false);
+        TextView guide=label("Chọn ngày sản xuất cụ thể. Mỗi máy cân một dòng: mã nhà, tuần tuổi và Trên – Giữa – Dưới (g). Hai máy có thể cùng mã nhà.",13,GREY,false);
         root.addView(guide);
         root.addView(space(7));
 
         for(int day=0;day<3;day++) {
-            root.addView(dayCard(day));
+            dayCards[day]=dayCard(day);
+            root.addView(dayCards[day]);
             root.addView(space(9));
         }
+        dayCards[2].setVisibility(visibleDayCount==3?View.VISIBLE:View.GONE);
+
+        thirdDayToggle=new Button(this);
+        thirdDayToggle.setAllCaps(false);
+        thirdDayToggle.setTextSize(14);
+        thirdDayToggle.setTypeface(Typeface.DEFAULT_BOLD);
+        thirdDayToggle.setTextColor(NAVY);
+        thirdDayToggle.setBackground(round(PALE,10,BORDER));
+        thirdDayToggle.setOnClickListener(v->{
+            visibleDayCount=visibleDayCount==2?3:2;
+            store.edit().putInt("visible_days",visibleDayCount).apply();
+            dayCards[2].setVisibility(visibleDayCount==3?View.VISIBLE:View.GONE);
+            updateThirdDayToggle();
+            refresh();
+        });
+        root.addView(thirdDayToggle,new LinearLayout.LayoutParams(-1,dp(44)));
+        updateThirdDayToggle();
+        root.addView(space(9));
         overallStatus=label("",13,NAVY,true);
         root.addView(overallStatus);
         root.addView(space(9));
@@ -166,18 +206,70 @@ public class EggWeightActivity extends Activity {
         return card;
     }
 
+    private View machineConfigCard() {
+        LinearLayout card=verticalCard();
+        LinearLayout bar=new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout labels=new LinearLayout(this);
+        labels.setOrientation(LinearLayout.VERTICAL);
+        labels.addView(label("Số máy cân",17,NAVY,true));
+        labels.addView(label("Mỗi máy một dòng cân trên từng ngày sản xuất",12,GREY,false));
+        bar.addView(labels,new LinearLayout.LayoutParams(0,-2,1f));
+        machineCountView=dateButtonText();
+        machineCountView.setText(machineCount+" máy");
+        machineCountView.setOnClickListener(v->pickMachineCount());
+        bar.addView(machineCountView,new LinearLayout.LayoutParams(dp(104),dp(48)));
+        card.addView(bar);
+        card.addView(space(5));
+        card.addView(label("VD: 8 máy sẽ có 8 dòng; máy 1 và máy 2 có thể cùng nhà V2.",12,GREY,false));
+        return card;
+    }
+
+    private void pickMachineCount() {
+        NumberPicker picker=new NumberPicker(this);
+        picker.setMinValue(1);
+        picker.setMaxValue(30);
+        picker.setWrapSelectorWheel(false);
+        picker.setValue(machineCount);
+        picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
+        new AlertDialog.Builder(this)
+            .setTitle("Chọn số máy cân")
+            .setView(picker)
+            .setPositiveButton("ÁP DỤNG",(dialog,which)->{
+                int count=picker.getValue();
+                if(count!=machineCount) {
+                    machineCount=count;
+                    store.edit().putInt("machine_count",machineCount).apply();
+                    for(int day=0;day<3;day++) rows[day].clear();
+                    setContentView(buildScreen());
+                    refresh();
+                }
+            })
+            .setNegativeButton("HỦY",null)
+            .show();
+    }
+
+    private void updateThirdDayToggle() {
+        if(thirdDayToggle!=null) {
+            thirdDayToggle.setText(visibleDayCount==2?
+                "+ THÊM NGÀY SẢN XUẤT THỨ 3" : "CHỈ XUẤT 2 NGÀY SẢN XUẤT");
+        }
+    }
+
     private View dayCard(int day) {
         LinearLayout card=verticalCard();
         LinearLayout titleRow=new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        titleRow.addView(label("NGÀY " +(day+1),17,NAVY,true),
-            new LinearLayout.LayoutParams(0,-2,1f));
+        TextView heading=label("CHƯA CHỌN NGÀY SX",16,NAVY,true);
+        dayHeadingTexts[day]=heading;
+        titleRow.addView(heading,new LinearLayout.LayoutParams(0,-2,1f));
         TextView date=dateButtonText();
-        date.setTextSize(14);
+        date.setTextSize(13);
         dayDateTexts[day]=date;
         date.setOnClickListener(v->pickDate("production_"+day,date,true));
-        titleRow.addView(date,new LinearLayout.LayoutParams(dp(158),dp(43)));
+        titleRow.addView(date,new LinearLayout.LayoutParams(dp(142),dp(43)));
         card.addView(titleRow);
 
         TextView status=label("",12,GREY,false);
@@ -191,24 +283,21 @@ public class EggWeightActivity extends Activity {
         card.addView(container);
 
         String saved=store.getString("ids_"+day,"0");
-        if (saved.trim().isEmpty()) saved="0";
+        if(saved==null||saved.trim().isEmpty()) saved="0";
+        ArrayList<String> ids=new ArrayList<>();
         for(String id:saved.split(",")) {
-            if (!id.trim().isEmpty()) appendRow(day,id.trim());
+            if(!id.trim().isEmpty()) ids.add(id.trim());
         }
-        Button add=new Button(this);
-        add.setAllCaps(false);
-        add.setText("+ THÊM NHÀ");
-        add.setTextSize(13);
-        add.setTextColor(NAVY);
-        add.setTypeface(Typeface.DEFAULT_BOLD);
-        add.setBackground(round(PALE,10,BORDER));
-        add.setOnClickListener(v->addHouse(day));
-        LinearLayout.LayoutParams ap=new LinearLayout.LayoutParams(-1,dp(43));
-        ap.topMargin=dp(7);
-        card.addView(add,ap);
-
+        while(ids.size()<machineCount) {
+            long next=store.getLong("next_id",1);
+            store.edit().putLong("next_id",next+1).apply();
+            ids.add(String.valueOf(next));
+        }
+        store.edit().putString("ids_"+day,android.text.TextUtils.join(",",ids)).apply();
+        for(int index=0;index<machineCount;index++) appendRow(day,ids.get(index));
         long ms=store.getLong("production_"+day,0);
-        date.setText(ms>0?formatDate(ms):"Chọn ngày SX");
+        date.setText(ms>0?"Đổi ngày":"Chọn ngày");
+        heading.setText(ms>0? "NGÀY SX\n"+formatDate(ms):"CHƯA CHỌN NGÀY SX");
         return card;
     }
 
@@ -226,16 +315,16 @@ public class EggWeightActivity extends Activity {
 
         LinearLayout header=new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        header.addView(label("NHÀ "+rows[day].size(),13,NAVY,true),
+        header.addView(label("MÁY CÂN "+rows[day].size(),13,NAVY,true),
             new LinearLayout.LayoutParams(0,-2,1f));
         Button remove=new Button(this);
-        remove.setText("Xóa nhà");
+        remove.setText("Xóa số");
         remove.setAllCaps(false);
         remove.setTextSize(12);
         remove.setTextColor(Color.rgb(190,77,58));
         remove.setPadding(dp(4),0,dp(4),0);
         remove.setBackground(round(Color.rgb(255,244,241),8,BORDER));
-        remove.setOnClickListener(v->removeHouse(day,row));
+        remove.setOnClickListener(v->clearMachineRow(row));
         header.addView(remove,new LinearLayout.LayoutParams(dp(87),dp(34)));
         card.addView(header);
 
@@ -244,7 +333,7 @@ public class EggWeightActivity extends Activity {
         row.house=input(day,id,"house","Mã nhà (VD: V2)",false);
         row.age=input(day,id,"age","Tuần tuổi",false);
         row.age.setInputType(InputType.TYPE_CLASS_NUMBER);
-        addColumn(rowOne,"Tên nhà",row.house,1.7f);
+        addColumn(rowOne,"Mã nhà",row.house,1.7f);
         addColumn(rowOne,"Tuần tuổi",row.age,1f);
         card.addView(rowOne);
 
@@ -299,38 +388,13 @@ public class EggWeightActivity extends Activity {
         return v;
     }
 
-    private void addHouse(int day) {
-        long id=store.getLong("next_id",1);
-        store.edit().putLong("next_id",id+1).apply();
-        appendRow(day,String.valueOf(id));
-        saveIds(day);
+    private void clearMachineRow(WeightRow row) {
+        row.house.setText("");
+        row.age.setText("");
+        row.top.setText("");
+        row.middle.setText("");
+        row.bottom.setText("");
         refresh();
-    }
-
-    private void removeHouse(int day,WeightRow row) {
-        if (rows[day].size()==1) {
-            row.house.setText("");row.age.setText("");
-            row.top.setText("");row.middle.setText("");row.bottom.setText("");
-        } else {
-            dayContainers[day].removeView(row.container);
-            rows[day].remove(row);
-            SharedPreferences.Editor ed=store.edit();
-            for(String field:new String[]{"house","age","top","middle","bottom"}) {
-                ed.remove("entry_"+day+"_"+row.id+"_"+field);
-            }
-            ed.apply();
-            saveIds(day);
-        }
-        refresh();
-    }
-
-    private void saveIds(int day) {
-        StringBuilder ids=new StringBuilder();
-        for(WeightRow r:rows[day]) {
-            if(ids.length()>0) ids.append(',');
-            ids.append(r.id);
-        }
-        store.edit().putString("ids_"+day,ids.toString()).apply();
     }
 
     private void pickDate(String key,TextView output,boolean production) {
@@ -360,7 +424,10 @@ public class EggWeightActivity extends Activity {
         for(int i=0;i<3;i++) {
             if(dayDateTexts[i]!=null) {
                 long date=store.getLong("production_"+i,0);
-                dayDateTexts[i].setText(date>0?formatDate(date):"Chọn ngày SX");
+                dayDateTexts[i].setText(date>0?"Đổi ngày":"Chọn ngày");
+                if(dayHeadingTexts[i]!=null) {
+                    dayHeadingTexts[i].setText(date>0?"NGÀY SX\n"+formatDate(date):"CHƯA CHỌN NGÀY SX");
+                }
             }
         }
     }
@@ -415,74 +482,75 @@ public class EggWeightActivity extends Activity {
 
     private void refresh() {
         if(overallStatus==null||exportButton==null) return;
+        long incubation=store.getLong("incubation",0);
         int validDays=0;
-        boolean incomplete=false;
-        HashSet<Long> distinct=new HashSet<>();
-        for(int day=0;day<3;day++) {
+        HashSet<String> distinct=new HashSet<>();
+        boolean datesValid=true;
+        for(int day=0;day<visibleDayCount;day++) {
             long date=store.getLong("production_"+day,0);
-            if(date>0) distinct.add(date);
+            if(date>0) {
+                distinct.add(formatDate(date));
+                if(incubation>0 && date>incubation) datesValid=false;
+            }
             int filled=0;
-            boolean partial=false;
             for(WeightRow r:rows[day]) {
                 updateAverage(r);
                 if(complete(r)) filled++;
-                else if(containsData(r)) partial=true;
             }
-            boolean dayReady=date>0 && filled>0 && !partial;
+            boolean dayReady=date>0 && filled==machineCount;
             if(dayReady) validDays++;
-            if(partial) incomplete=true;
             if(dayStatusTexts[day]!=null) {
-                String status=dayReady?"✓ Đủ dữ liệu • "+filled+" nhà":
-                    (partial?"Còn dòng chưa đủ 3 vị trí hoặc tuần tuổi":
-                    (date==0?"Chọn ngày sản xuất":"Nhập ít nhất 1 nhà và đủ 3 vị trí"));
+                String status=date==0?"Chọn ngày sản xuất":
+                    (filled==machineCount?
+                    "✓ Đã đủ "+filled+"/"+machineCount+" máy cân" :
+                    "Đã nhập đủ "+filled+"/"+machineCount+" máy • cần mã nhà, tuần tuổi, 3 vị trí");
                 dayStatusTexts[day].setText(status);
                 dayStatusTexts[day].setTextColor(dayReady?GREEN:GREY);
             }
         }
-        boolean validDate=store.getLong("incubation",0)>0;
-        boolean unique=distinct.size()==3;
-        boolean allReady=validDate && validDays==3 && unique && !incomplete;
+        boolean unique=distinct.size()==visibleDayCount;
+        boolean allReady=incubation>0 && validDays==visibleDayCount && unique && datesValid;
         exportButton.setEnabled(allReady);
         exportButton.setVisibility(allReady?View.VISIBLE:View.GONE);
         exportButton.setBackground(round(allReady?BLUE:Color.rgb(137,155,181),12,BORDER));
-        if(!validDate) overallStatus.setText("Cần chọn ngày ấp để xuất Excel.");
-        else if(!unique && validDays==3) overallStatus.setText("3 ngày sản xuất phải khác nhau.");
-        else if(allReady) overallStatus.setText("✓ Đã đủ 3 ngày. Có thể gửi file Excel.");
-        else overallStatus.setText("Đã hoàn thành "+validDays+"/3 ngày • Hoàn thiện để bật nút gửi Excel.");
+        if(incubation==0) overallStatus.setText("Hãy chọn ngày ấp.");
+        else if(!datesValid) overallStatus.setText("Ngày sản xuất phải không sau ngày ấp.");
+        else if(validDays==visibleDayCount&&!unique) overallStatus.setText("Chọn "+visibleDayCount+" ngày sản xuất khác nhau.");
+        else if(allReady) overallStatus.setText("✓ Đủ "+visibleDayCount+" ngày và "+machineCount+" máy/ngày. Có thể gửi Excel.");
+        else overallStatus.setText("Hoàn thành "+validDays+"/"+visibleDayCount+" ngày • "+machineCount+" máy/ngày.");
         overallStatus.setTextColor(allReady?GREEN:NAVY);
     }
 
     private void sendExcel() {
         long incub=store.getLong("incubation",0);
         if(incub<=0) return;
-        HashSet<Long> distinct=new HashSet<>();
+        HashSet<String> distinct=new HashSet<>();
         ArrayList<XlsxExporter.Record> data=new ArrayList<>();
-        for(int day=0;day<3;day++) {
+        for(int day=0;day<visibleDayCount;day++) {
             long prod=store.getLong("production_"+day,0);
-            if(prod<=0||!distinct.add(prod)) {
-                Toast.makeText(this,"Cần đủ 3 ngày sản xuất khác nhau.",Toast.LENGTH_LONG).show();
+            if(prod<=0 || prod>incub || !distinct.add(formatDate(prod))) {
+                Toast.makeText(this,"Hãy chọn ngày sản xuất hợp lệ và không trùng.",Toast.LENGTH_LONG).show();
                 return;
             }
-            int num=0;
-            for(WeightRow r:rows[day]) {
-                if(complete(r)) {
-                    data.add(new XlsxExporter.Record(formatDate(prod),
-                        r.house.getText().toString().trim(),
-                        Integer.parseInt(r.age.getText().toString().trim()),
-                        weight(r.top),weight(r.middle),weight(r.bottom)));
-                    num++;
-                } else if (containsData(r)) {
-                    Toast.makeText(this,"Có nhà chưa nhập đủ dữ liệu.",Toast.LENGTH_LONG).show();
+            if(rows[day].size()!=machineCount) return;
+            for(int machine=0;machine<machineCount;machine++) {
+                WeightRow r=rows[day].get(machine);
+                if(!complete(r)) {
+                    Toast.makeText(this,"Máy cân "+(machine+1)+" ngày "+formatDate(prod)+" chưa đủ dữ liệu.",Toast.LENGTH_LONG).show();
                     return;
                 }
+                data.add(new XlsxExporter.Record(formatDate(prod),machine+1,
+                    r.house.getText().toString().trim(),
+                    Integer.parseInt(r.age.getText().toString().trim()),
+                    weight(r.top),weight(r.middle),weight(r.bottom)));
             }
-            if(num==0) return;
         }
         try {
             File dir=new File(getCacheDir(),"egg_exports");
             if(!dir.exists()&&!dir.mkdirs()) throw new IllegalStateException("Không tạo được thư mục xuất.");
             File xlsx=new File(dir,"Can-trung.xlsx");
-            XlsxExporter.write(xlsx,formatDate(incub),formatDate(hatchMillis(incub)),data);
+            XlsxExporter.write(xlsx,formatDate(incub),formatDate(hatchMillis(incub)),
+                visibleDayCount,machineCount,data);
             Intent send=new Intent(Intent.ACTION_SEND);
             send.setType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
             send.putExtra(Intent.EXTRA_SUBJECT,"Báo cáo cân trứng");
