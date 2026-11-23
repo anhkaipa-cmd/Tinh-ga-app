@@ -128,7 +128,7 @@ public final class XlsxExporter {
             num(xml,"F"+line,r.top,3);
             num(xml,"G"+line,r.middle,3);
             num(xml,"H"+line,r.bottom,3);
-            num(xml,"I"+line,r.average(),3);
+            formula(xml,"I"+line,"(F"+line+"+G"+line+"+H"+line+")/3",r.average(),3);
             xml.append("</row>");
         }
         xml.append("</sheetData><autoFilter ref=\"A4:I").append(records.size()+4).append("\"/>");
@@ -145,6 +145,11 @@ public final class XlsxExporter {
         if (!Double.isFinite(value)) value=0;
         out.append("<c r=\"").append(cell).append("\" s=\"").append(style).append("\"><v>")
            .append(String.format(Locale.US,"%.2f",value)).append("</v></c>");
+    }
+    private static void formula(StringBuilder out, String cell, String expression, double cached, int style) {
+        out.append("<c r=\"").append(cell).append("\" s=\"").append(style)
+           .append("\"><f>").append(expression).append("</f><v>")
+           .append(String.format(Locale.US,"%.2f",cached)).append("</v></c>");
     }
     private static String escape(String input) {
         if (input==null) return "";
