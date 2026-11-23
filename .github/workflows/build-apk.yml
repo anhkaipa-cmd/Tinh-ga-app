@@ -37,6 +37,12 @@ jobs:
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug --stacktrace
 
+      - name: Verify sample weights and average
+        run: |
+          mkdir -p /tmp/tinh-ga-weight-test
+          javac -d /tmp/tinh-ga-weight-test app/src/main/java/com/anhthu/tinhga/EggWeightValue.java tools/EggWeightValueTest.java
+          java -cp /tmp/tinh-ga-weight-test EggWeightValueTest
+
       - name: Verify weighing Excel workbook
         run: |
           mkdir -p /tmp/tinh-ga-xlsx-test
