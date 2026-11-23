@@ -45,7 +45,6 @@ public class EggWeightActivity extends Activity {
 
     private SharedPreferences store;
     private final ArrayList<WeightRow>[] rows=new ArrayList[3];
-    private final TextView[] dayDateTexts=new TextView[3];
     private final TextView[] dayStatusTexts=new TextView[3];
     private final LinearLayout[] dayContainers=new LinearLayout[3];
     private final TextView[] dayHeadingTexts=new TextView[3];
@@ -61,7 +60,7 @@ public class EggWeightActivity extends Activity {
     private static class WeightRow {
         final String id;
         EditText machine, house, age, top, middle, bottom;
-        TextView average;
+        TextView average, productionDate;
         View container;
         WeightRow(String id) { this.id=id; }
     }
@@ -133,7 +132,7 @@ public class EggWeightActivity extends Activity {
         root.addView(navigation());
         root.addView(space(12));
         // Each incubation day has its own machine-count selector below.
-        TextView guide=label("Mỗi đợt có ngày ấp và ngày sản xuất riêng. Mỗi dòng nhập mã máy cân thực tế, mã nhà, tuần tuổi và 3 vị trí cân (g).",13,GREY,false);
+        TextView guide=label("Mỗi đợt có ngày ấp riêng. Mỗi máy cân chọn ngày sản xuất riêng, mã máy, mã nhà, tuần tuổi và 3 vị trí cân (g).",13,GREY,false);
         root.addView(guide);
         root.addView(space(7));
 
@@ -259,15 +258,9 @@ public class EggWeightActivity extends Activity {
         LinearLayout titleRow=new LinearLayout(this);
         titleRow.setOrientation(LinearLayout.HORIZONTAL);
         titleRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView heading=label("ĐỢT ẤP",16,NAVY,true);
+        TextView heading=label("ĐỢT ẤP",17,NAVY,true);
         dayHeadingTexts[day]=heading;
-        titleRow.addView(heading,new LinearLayout.LayoutParams(0,-2,1f));
-        TextView date=dateButtonText();
-        date.setTextSize(13);
-        dayDateTexts[day]=date;
-        date.setOnClickListener(v->pickDate("production_"+day,date,true));
-        titleRow.addView(date,new LinearLayout.LayoutParams(dp(142),dp(43)));
-        card.addView(titleRow);
+        card.addView(heading);
         card.addView(space(8));
         addIncubationRow(card,day);
         card.addView(machinePickerRow(day));
@@ -296,9 +289,6 @@ public class EggWeightActivity extends Activity {
         }
         store.edit().putString("ids_"+day,android.text.TextUtils.join(",",ids)).apply();
         for(int index=0;index<machineCounts[day];index++) appendRow(day,ids.get(index));
-        long ms=store.getLong("production_"+day,0);
-        date.setText(ms>0?"SX "+formatDate(ms):"Chọn ngày SX");
-        long incubation=store.getLong("incubation_"+day,0);
         long incub=store.getLong("incubation_"+day,0);
         heading.setText(incub>0?incubationHeading(incub):"CHỌN NGÀY ẤP");
         incubationInputs[day].setText(incub>0?formatDate(incub):"Chọn ngày ấp");
@@ -329,7 +319,7 @@ public class EggWeightActivity extends Activity {
         remove.setTextColor(Color.rgb(190,77,58));
         remove.setPadding(dp(4),0,dp(4),0);
         remove.setBackground(round(Color.rgb(255,244,241),8,BORDER));
-        remove.setOnClickListener(v->clearMachineRow(row));
+        remove.setOnClickListener(v->clearMachineRow(day,row));
         header.addView(remove,new LinearLayout.LayoutParams(dp(87),dp(34)));
         card.addView(header);
 
@@ -343,6 +333,20 @@ public class EggWeightActivity extends Activity {
         addColumn(rowOne,"Mã nhà",row.house,1.15f);
         addColumn(rowOne,"Tuần tuổi",row.age,1f);
         card.addView(rowOne);
+        LinearLayout dateRow=new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        dateRow.addView(label("Ngày sản xuất riêng của máy:",12,GREY,false),
+            new LinearLayout.LayoutParams(0,-2,1f));
+        row.productionDate=dateButtonText();
+        row.productionDate.setTextSize(14);
+        long production=store.getLong(machineDateKey(day,id),0);
+        row.productionDate.setText(production>0?formatDate(production):"Chọn ngày SX");
+        row.productionDate.setOnClickListener(v->pickMachineProduction(day,row));
+        dateRow.addView(row.productionDate,new LinearLayout.LayoutParams(dp(158),dp(44)));
+        LinearLayout.LayoutParams dateParams=new LinearLayout.LayoutParams(-1,-2);
+        dateParams.setMargins(dp(2),dp(4),dp(2),dp(8));
+        card.addView(dateRow,dateParams);
 
         LinearLayout weights=new LinearLayout(this);
         weights.setOrientation(LinearLayout.HORIZONTAL);
@@ -395,7 +399,9 @@ public class EggWeightActivity extends Activity {
         return v;
     }
 
-    private void clearMachineRow(WeightRow row) {
+    private void clearMachineRow(int day, WeightRow row) {
+        store.edit().remove(machineDateKey(day,row.id)).apply();
+        row.productionDate.setText("Chọn ngày SX");
         row.machine.setText("");
         row.house.setText("");
         row.age.setText("");
@@ -403,6 +409,37 @@ public class EggWeightActivity extends Activity {
         row.middle.setText("");
         row.bottom.setText("");
         refresh();
+    }
+
+    private String machineDateKey(int day,String id) {
+        return "machine_production_"+day+"_"+id;
+    }
+
+    private void pickMachineProduction(int day, WeightRow row) {
+        String key=machineDateKey(day,row.id);
+        long saved=store.getLong(key,0);
+        long incub=store.getLong("incubation_"+day,0);
+        Calendar cal=Calendar.getInstance();
+        if(saved>0) cal.setTimeInMillis(saved);
+        else if(incub>0) {
+            cal.setTimeInMillis(incub);
+            cal.add(Calendar.DAY_OF_MONTH,-1);
+        }
+        DatePickerDialog dialog=new DatePickerDialog(this,(picker,year,month,date)->{
+            Calendar chosen=Calendar.getInstance();
+            chosen.clear();
+            chosen.set(year,month,date,12,0,0);
+            long when=chosen.getTimeInMillis();
+            if(incub>0 && when>incub) {
+                Toast.makeText(this,"Ngày sản xuất không được sau ngày ấp.",Toast.LENGTH_LONG).show();
+                return;
+            }
+            store.edit().putLong(key,when).apply();
+            row.productionDate.setText(formatDate(when));
+            refresh();
+        },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH));
+        if(incub>0) dialog.getDatePicker().setMaxDate(incub);
+        dialog.show();
     }
 
     private void pickDate(String key,TextView output,boolean production) {
@@ -418,11 +455,6 @@ public class EggWeightActivity extends Activity {
             updateDates();
             refresh();
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH));
-        if(production) {
-            int day=Integer.parseInt(key.substring(key.lastIndexOf('_')+1));
-            long incub=store.getLong("incubation_"+day,0);
-            if(incub>0) dialog.getDatePicker().setMaxDate(incub);
-        }
         dialog.show();
     }
 
@@ -439,15 +471,12 @@ public class EggWeightActivity extends Activity {
     private void updateDates() {
         for(int i=0;i<3;i++) {
             long incub=store.getLong("incubation_"+i,0);
-            long prod=store.getLong("production_"+i,0);
             if(incubationInputs[i]!=null)
                 incubationInputs[i].setText(incub>0?formatDate(incub):"Chọn ngày ấp");
             if(hatchOutputs[i]!=null)
                 hatchOutputs[i].setText(incub>0?formatDate(hatchMillis(incub)):"—");
             if(dayHeadingTexts[i]!=null)
                 dayHeadingTexts[i].setText(incub>0?incubationHeading(incub):"CHỌN NGÀY ẤP");
-            if(dayDateTexts[i]!=null)
-                dayDateTexts[i].setText(prod>0?"SX "+formatDate(prod):"Chọn ngày SX");
         }
     }
 
@@ -487,8 +516,11 @@ public class EggWeightActivity extends Activity {
         return false;
     }
 
-    private boolean complete(WeightRow r) {
+    private boolean complete(int day, WeightRow r) {
         if(r.machine==null||r.house==null||r.age==null) return false;
+        long incubation=store.getLong("incubation_"+day,0);
+        long production=store.getLong(machineDateKey(day,r.id),0);
+        if(incubation<=0 || production<=0 || production>incubation) return false;
         if(r.machine.getText().toString().trim().isEmpty() || r.house.getText().toString().trim().isEmpty()) return false;
         int age;
         try { age=Integer.parseInt(r.age.getText().toString().trim()); }
@@ -503,12 +535,10 @@ public class EggWeightActivity extends Activity {
         boolean[] ready=new boolean[3];
         for(int day=0;day<3;day++) {
             long incub=store.getLong("incubation_"+day,0);
-            long production=store.getLong("production_"+day,0);
-            if(incub<=0 || production<=0 || production>incub
-                    || rows[day].size()!=machineCounts[day]) continue;
+            if(incub<=0 || rows[day].size()!=machineCounts[day]) continue;
             boolean valid=true;
             for(WeightRow row:rows[day]) {
-                if(!complete(row)) { valid=false; break; }
+                if(!complete(day,row)) { valid=false; break; }
             }
             ready[day]=valid;
         }
@@ -523,16 +553,13 @@ public class EggWeightActivity extends Activity {
             int filled=0;
             for(WeightRow r:rows[day]) {
                 updateAverage(r);
-                if(complete(r)) filled++;
+                if(complete(day,r)) filled++;
             }
             long incub=store.getLong("incubation_"+day,0);
-            long production=store.getLong("production_"+day,0);
             if(ready[day]) completed++;
             if(dayStatusTexts[day]!=null) {
                 String state=ready[day]?"✓ Hoàn thành "+machineCounts[day]+" máy":
-                    production==0?"Chọn ngày sản xuất và nhập mã máy cân":
-                    production>incub?"Ngày sản xuất không được sau ngày ấp":
-                    "Đã đủ "+filled+"/"+machineCounts[day]+" máy • nhập mã máy, nhà, tuần tuổi và 3 vị trí";
+                    "Đã đủ "+filled+"/"+machineCounts[day]+" máy • kiểm tra ngày SX từng máy, mã máy, nhà, tuần tuổi, 3 vị trí";
                 dayStatusTexts[day].setText(state);
                 dayStatusTexts[day].setTextColor(ready[day]?GREEN:GREY);
             }
@@ -555,8 +582,7 @@ public class EggWeightActivity extends Activity {
             if(ready[day]) {
                 available.add(day);
                 long incub=store.getLong("incubation_"+day,0);
-                long production=store.getLong("production_"+day,0);
-                labels.add(incubationHeading(incub)+" • SX "+formatDate(production));
+                labels.add(incubationHeading(incub)+" • "+machineCounts[day]+" máy cân");
             }
         }
         if(available.size()<2) {
@@ -585,15 +611,15 @@ public class EggWeightActivity extends Activity {
         ArrayList<XlsxExporter.Record> data=new ArrayList<>();
         for(int day:selectedDays) {
             long incub=store.getLong("incubation_"+day,0);
-            long production=store.getLong("production_"+day,0);
-            if(incub<=0 || production<=0 || rows[day].size()!=machineCounts[day]) return;
+            if(incub<=0 || rows[day].size()!=machineCounts[day]) return;
             for(WeightRow r:rows[day]) {
-                if(!complete(r)) {
+                if(!complete(day,r)) {
                     Toast.makeText(this,"Dữ liệu cân trứng chưa đầy đủ.",Toast.LENGTH_LONG).show();
                     return;
                 }
+                long machineProduction=store.getLong(machineDateKey(day,r.id),0);
                 data.add(new XlsxExporter.Record(
-                    formatDate(incub),formatDate(hatchMillis(incub)),formatDate(production),
+                    formatDate(incub),formatDate(hatchMillis(incub)),formatDate(machineProduction),
                     r.machine.getText().toString().trim(),
                     r.house.getText().toString().trim(),
                     Integer.parseInt(r.age.getText().toString().trim()),
