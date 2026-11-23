@@ -93,7 +93,7 @@ public class EggWeightActivity extends Activity {
         dateEditor.apply();
         // Migrate the old shared count once, then keep each incubation date independent.
         int oldSharedCount=store.getInt("machine_count",1);
-        oldSharedCount=Math.max(1,Math.min(30,oldSharedCount));
+        oldSharedCount=Math.max(1,Math.min(10,oldSharedCount));
         SharedPreferences.Editor migrate=store.edit();
         for(int day=0;day<3;day++) {
             String key="machine_count_"+day;
@@ -102,7 +102,7 @@ public class EggWeightActivity extends Activity {
                 previous=oldSharedCount;
                 migrate.putInt(key,previous);
             }
-            machineCounts[day]=Math.max(1,Math.min(30,previous));
+            machineCounts[day]=Math.max(1,Math.min(10,previous));
         }
         migrate.apply();
         setContentView(buildScreen());
@@ -132,7 +132,7 @@ public class EggWeightActivity extends Activity {
         root.addView(navigation());
         root.addView(space(12));
         // Each incubation day has its own machine-count selector below.
-        TextView guide=label("Mỗi đợt có ngày ấp riêng. Mỗi máy cân chọn ngày sản xuất riêng, mã máy, mã nhà, tuần tuổi và 3 vị trí cân (g).",13,GREY,false);
+        TextView guide=label("Mỗi đợt có ngày ấp và số máy riêng (tối đa 10). Mỗi máy có ngày SX, mã máy, mã nhà, tuần tuổi và 3 vị trí cân (5.000–18.000 g).",13,GREY,false);
         root.addView(guide);
         root.addView(space(7));
 
@@ -231,7 +231,7 @@ public class EggWeightActivity extends Activity {
     private void pickMachineCount(int day) {
         NumberPicker picker=new NumberPicker(this);
         picker.setMinValue(1);
-        picker.setMaxValue(30);
+        picker.setMaxValue(10);
         picker.setWrapSelectorWheel(false);
         picker.setValue(machineCounts[day]);
         picker.setDescendantFocusability(NumberPicker.FOCUS_BLOCK_DESCENDANTS);
@@ -556,7 +556,7 @@ public class EggWeightActivity extends Activity {
             if(ready[day]) completed++;
             if(dayStatusTexts[day]!=null) {
                 String state=ready[day]?"✓ Hoàn thành "+machineCounts[day]+" máy":
-                    "Đã đủ "+filled+"/"+machineCounts[day]+" máy • kiểm tra ngày SX từng máy, mã máy, nhà, tuần tuổi, 3 vị trí";
+                    "Đủ "+filled+"/"+machineCounts[day]+" máy • kiểm tra ngày SX, mã máy, nhà, tuổi và trọng lượng 5.000–18.000 g";
                 dayStatusTexts[day].setText(state);
                 dayStatusTexts[day].setTextColor(ready[day]?GREEN:GREY);
             }
