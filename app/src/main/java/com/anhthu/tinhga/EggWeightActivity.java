@@ -91,6 +91,12 @@ public class EggWeightActivity extends Activity {
         ScrollView scroll=new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(BG);
+        // Respect status/navigation bar insets on Android 15+ edge-to-edge screens.
+        scroll.setOnApplyWindowInsetsListener((view,insets)->{
+            view.setPadding(0,insets.getSystemWindowInsetTop(),
+                0,insets.getSystemWindowInsetBottom());
+            return insets;
+        });
         LinearLayout root=new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(13),dp(14),dp(13),dp(24));
