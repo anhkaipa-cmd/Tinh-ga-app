@@ -40,6 +40,10 @@ public final class XlsxExporter {
     private XlsxExporter() {}
 
     public static void write(File target,int incubationDays,int machineCount,List<Record> records) throws IOException {
+        write(target,incubationDays,String.valueOf(machineCount),records);
+    }
+
+    public static void write(File target,int incubationDays,String machinesPerDay,List<Record> records) throws IOException {
         if (records == null || records.isEmpty()) {
             throw new IOException("Chưa có dữ liệu cân trứng để xuất.");
         }
@@ -66,7 +70,7 @@ public final class XlsxExporter {
                 "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
                 "</Relationships>");
             put(zip, "xl/styles.xml", styles());
-            put(zip, "xl/worksheets/sheet1.xml", worksheet(incubationDays,machineCount,records));
+            put(zip, "xl/worksheets/sheet1.xml", worksheet(incubationDays,machinesPerDay,records));
         }
     }
 
@@ -89,7 +93,7 @@ public final class XlsxExporter {
             "</cellXfs></styleSheet>";
     }
 
-    private static String worksheet(int incubationDays,int machineCount,List<Record> records) {
+    private static String worksheet(int incubationDays,String machinesPerDay,List<Record> records) {
         StringBuilder xml = new StringBuilder(4096 + records.size() * 360);
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
         xml.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
@@ -107,11 +111,11 @@ public final class XlsxExporter {
         xml.append("<row r=\"2\">");
         str(xml,"A2","Số đợt ấp",2);
         num(xml,"B2",incubationDays,0);
-        str(xml,"D2","Máy cân/đợt",2);
-        num(xml,"E2",machineCount,0);
+        str(xml,"D2","Máy cân mỗi đợt",2);
+        str(xml,"E2",machinesPerDay,0);
         xml.append("</row><row r=\"3\">");
         str(xml,"A3","Lưu ý",2);
-        str(xml,"B3","Ngày ấp, ngày ra gà và ngày SX riêng theo đợt",0);
+        str(xml,"B3","Ngày ấp theo đợt; ngày SX riêng cho từng máy cân",0);
         xml.append("</row>");
         xml.append("<row r=\"4\" ht=\"32\" customHeight=\"1\">");
         String[] heads = {"Ngày ấp","Ngày ra gà","Ngày sản xuất","Máy cân","Nhà","Tuần tuổi",
