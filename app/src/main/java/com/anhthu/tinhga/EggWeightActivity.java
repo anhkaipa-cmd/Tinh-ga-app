@@ -5,6 +5,10 @@ import android.app.DatePickerDialog;
 import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.Intent;
+import android.net.Uri;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
+import android.view.WindowManager;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -26,6 +30,9 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -56,6 +63,7 @@ public class EggWeightActivity extends Activity {
     private final TextView[] hatchOutputs=new TextView[3];
     private Button exportButton, thirdDayToggle;
     private int visibleDayCount;
+    private static final int REQUEST_SAVE_EXCEL = 6118;
 
     private static class WeightRow {
         final String id;
@@ -229,6 +237,7 @@ public class EggWeightActivity extends Activity {
     }
 
     private void pickMachineCount(int day) {
+        dismissKeyboard();
         NumberPicker picker=new NumberPicker(this);
         picker.setMinValue(1);
         picker.setMaxValue(10);
@@ -411,6 +420,44 @@ public class EggWeightActivity extends Activity {
         refresh();
     }
 
+    /** Close Android IME before opening a date picker or export selector. */
+    private void dismissKeyboard() {
+        View focused=getCurrentFocus();
+        try {
+            InputMethodManager imm=(InputMethodManager)getSystemService(Context.INPUT_METHOD_SERVICE);
+            if(imm!=null) {
+                View target=focused!=null?focused:getWindow().getDecorView();
+                imm.hideSoftInputFromWindow(target.getWindowToken(),0);
+            }
+        } catch(Exception ignored) {}
+        if(focused!=null) {
+            focused.clearFocus();
+        }
+        getWindow().setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN |
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+    }
+
+    private void presentDatePicker(DatePickerDialog dialog) {
+        dismissKeyboard();
+        if(dialog.getWindow()!=null) {
+            dialog.getWindow().setSoftInputMode(
+                WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN |
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+        }
+        // Wait for the previous EditText keyboard to finish collapsing.
+        getWindow().getDecorView().postDelayed(()->{
+            if(!isFinishing() && !isDestroyed()) {
+                dialog.show();
+                if(dialog.getWindow()!=null) {
+                    dialog.getWindow().setSoftInputMode(
+                        WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_HIDDEN |
+                        WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
+                }
+            }
+        },200);
+    }
+
     private String machineDateKey(int day,String id) {
         return "machine_production_"+day+"_"+id;
     }
@@ -439,7 +486,7 @@ public class EggWeightActivity extends Activity {
             refresh();
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH));
         if(incub>0) dialog.getDatePicker().setMaxDate(incub);
-        dialog.show();
+        presentDatePicker(dialog);
     }
 
     private void pickDate(String key,TextView output,boolean production) {
@@ -455,7 +502,7 @@ public class EggWeightActivity extends Activity {
             updateDates();
             refresh();
         },cal.get(Calendar.YEAR),cal.get(Calendar.MONTH),cal.get(Calendar.DAY_OF_MONTH));
-        dialog.show();
+        presentDatePicker(dialog);
     }
 
     private String incubationHeading(long ms) {
@@ -565,13 +612,14 @@ public class EggWeightActivity extends Activity {
         exportButton.setVisibility(View.VISIBLE);
         exportButton.setEnabled(true);
         exportButton.setBackground(round(BLUE,12,BORDER));
-        overallStatus.setText(completed>=2?
-            "✓ Hoàn thành "+completed+"/3 đợt ấp. Bấm GỬI EXCEL để chọn ngày xuất.":
-            "Đã hoàn thành "+completed+"/3 đợt ấp. Cần đủ ít nhất 2 đợt để gửi Excel.");
-        overallStatus.setTextColor(completed>=2?GREEN:NAVY);
+        overallStatus.setText(completed>=1?
+            "✓ Hoàn thành "+completed+"/3 đợt ấp. Có thể GỬI hoặc LƯU Excel. Chọn 1–3 đợt đã đủ dữ liệu.":
+            "Đã hoàn thành 0/3 đợt. Nhập đủ dữ liệu ít nhất 1 đợt để GỬI/LƯU Excel.");
+        overallStatus.setTextColor(completed>=1?GREEN:NAVY);
     }
 
     private void sendExcel() {
+        dismissKeyboard();
         boolean[] ready=completedDays();
         ArrayList<Integer> available=new ArrayList<>();
         ArrayList<String> labels=new ArrayList<>();
@@ -582,41 +630,63 @@ public class EggWeightActivity extends Activity {
                 labels.add(incubationHeading(incub)+" • "+machineCounts[day]+" máy cân");
             }
         }
-        if(available.size()<2) {
-            Toast.makeText(this,"Cần hoàn thành ít nhất 2 đợt ấp để gửi Excel.",Toast.LENGTH_LONG).show();
+        if(available.isEmpty()) {
+            new AlertDialog.Builder(this)
+                .setTitle("Chưa có đợt ấp hoàn chỉnh")
+                .setMessage("Mỗi máy cân cần đủ mã máy, mã nhà, tuần tuổi, ngày sản xuất và trọng lượng Trên – Giữa – Dưới từ 5.000–18.000 g. Hoàn thành ít nhất một đợt để xuất.")
+                .setPositiveButton("ĐÃ HIỂU",null)
+                .show();
             return;
         }
         boolean[] selected=new boolean[available.size()];
         java.util.Arrays.fill(selected,true);
         new AlertDialog.Builder(this)
-            .setTitle("Chọn ngày ấp cần xuất Excel")
-            .setMultiChoiceItems(labels.toArray(new String[0]),selected,(dlg,idx,checked)->selected[idx]=checked)
+            .setTitle("Chọn ngày ấp để xuất Excel")
+            .setMultiChoiceItems(labels.toArray(new String[0]),selected,
+                (dlg,idx,checked)->selected[idx]=checked)
             .setNegativeButton("HỦY",null)
-            .setPositiveButton("GỬI EXCEL",(dlg,button)->{
-                ArrayList<Integer> days=new ArrayList<>();
-                for(int i=0;i<available.size();i++) if(selected[i]) days.add(available.get(i));
-                if(days.size()<2) {
-                    Toast.makeText(this,"Hãy chọn ít nhất 2 đợt ấp.",Toast.LENGTH_LONG).show();
+            .setNeutralButton("LƯU EXCEL",(dlg,button)->{
+                ArrayList<Integer> days=selectedDays(available,selected);
+                if(days.isEmpty()) {
+                    Toast.makeText(this,"Chọn ít nhất một ngày ấp.",Toast.LENGTH_LONG).show();
                     return;
                 }
-                writeExcelAndShare(days);
+                buildExcel(days,true);
+            })
+            .setPositiveButton("GỬI EXCEL",(dlg,button)->{
+                ArrayList<Integer> days=selectedDays(available,selected);
+                if(days.isEmpty()) {
+                    Toast.makeText(this,"Chọn ít nhất một ngày ấp.",Toast.LENGTH_LONG).show();
+                    return;
+                }
+                buildExcel(days,false);
             })
             .show();
     }
 
-    private void writeExcelAndShare(List<Integer> selectedDays) {
+    private ArrayList<Integer> selectedDays(ArrayList<Integer> available,boolean[] selected) {
+        ArrayList<Integer> days=new ArrayList<>();
+        for(int i=0;i<available.size();i++) if(selected[i]) days.add(available.get(i));
+        return days;
+    }
+
+    private void buildExcel(List<Integer> selectedDays,boolean saveToDevice) {
         ArrayList<XlsxExporter.Record> data=new ArrayList<>();
         for(int day:selectedDays) {
             long incub=store.getLong("incubation_"+day,0);
-            if(incub<=0 || rows[day].size()!=machineCounts[day]) return;
+            if(incub<=0 || rows[day].size()!=machineCounts[day]) {
+                Toast.makeText(this,"Số máy cân chưa khớp với dữ liệu.",Toast.LENGTH_LONG).show();
+                return;
+            }
             for(WeightRow r:rows[day]) {
                 if(!complete(day,r)) {
-                    Toast.makeText(this,"Dữ liệu cân trứng chưa đầy đủ.",Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,"Vẫn có máy cân thiếu ngày SX hoặc trọng lượng hợp lệ.",Toast.LENGTH_LONG).show();
                     return;
                 }
                 long machineProduction=store.getLong(machineDateKey(day,r.id),0);
                 data.add(new XlsxExporter.Record(
-                    formatDate(incub),formatDate(hatchMillis(incub)),formatDate(machineProduction),
+                    formatDate(incub),formatDate(hatchMillis(incub)),
+                    formatDate(machineProduction),
                     r.machine.getText().toString().trim(),
                     r.house.getText().toString().trim(),
                     Integer.parseInt(r.age.getText().toString().trim()),
@@ -625,7 +695,7 @@ public class EggWeightActivity extends Activity {
         }
         try {
             File dir=new File(getCacheDir(),"egg_exports");
-            if(!dir.exists()&&!dir.mkdirs()) throw new IllegalStateException("Không tạo được thư mục xuất.");
+            if(!dir.exists()&&!dir.mkdirs()) throw new IllegalStateException("Không tạo được thư mục.");
             File file=new File(dir,"Can-trung.xlsx");
             StringBuilder counts=new StringBuilder();
             for(int day:selectedDays) {
@@ -634,15 +704,44 @@ public class EggWeightActivity extends Activity {
                       .append(": ").append(machineCounts[day]);
             }
             XlsxExporter.write(file,selectedDays.size(),counts.toString(),data);
-            Intent send=new Intent(Intent.ACTION_SEND);
-            send.setType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-            send.putExtra(Intent.EXTRA_SUBJECT,"Báo cáo cân trứng");
-            send.putExtra(Intent.EXTRA_STREAM,EggExcelProvider.SHARE_URI);
-            send.setClipData(ClipData.newRawUri("Can-trung.xlsx",EggExcelProvider.SHARE_URI));
-            send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(Intent.createChooser(send,"Gửi Excel cân trứng"));
+            if(saveToDevice) {
+                Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);
+                save.addCategory(Intent.CATEGORY_OPENABLE);
+                save.setType(EggExcelProvider.MIME);
+                save.putExtra(Intent.EXTRA_TITLE,"Can-trung.xlsx");
+                startActivityForResult(save,REQUEST_SAVE_EXCEL);
+            } else {
+                Intent send=new Intent(Intent.ACTION_SEND);
+                send.setType(EggExcelProvider.MIME);
+                send.putExtra(Intent.EXTRA_SUBJECT,"Báo cáo cân trứng");
+                send.putExtra(Intent.EXTRA_STREAM,EggExcelProvider.SHARE_URI);
+                send.setClipData(ClipData.newRawUri("Can-trung.xlsx",EggExcelProvider.SHARE_URI));
+                send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                Intent chooser=Intent.createChooser(send,"Gửi Excel cân trứng");
+                chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                startActivity(chooser);
+            }
         } catch(Exception e) {
-            Toast.makeText(this,"Lỗi xuất Excel: "+e.getMessage(),Toast.LENGTH_LONG).show();
+            Toast.makeText(this,"Không xuất được Excel: "+e.getMessage(),Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        super.onActivityResult(requestCode,resultCode,data);
+        if(requestCode!=REQUEST_SAVE_EXCEL || resultCode!=Activity.RESULT_OK
+                || data==null || data.getData()==null) return;
+        Uri destination=data.getData();
+        File file=new File(new File(getCacheDir(),"egg_exports"),"Can-trung.xlsx");
+        try(InputStream input=new FileInputStream(file);
+            OutputStream output=getContentResolver().openOutputStream(destination)) {
+            if(output==null) throw new IllegalStateException("Không mở được file đích.");
+            byte[] buffer=new byte[8192];
+            int n;
+            while((n=input.read(buffer))!=-1) output.write(buffer,0,n);
+            output.flush();
+            Toast.makeText(this,"Đã lưu file Can-trung.xlsx",Toast.LENGTH_LONG).show();
+        } catch(Exception e) {
+            Toast.makeText(this,"Lưu Excel thất bại: "+e.getMessage(),Toast.LENGTH_LONG).show();
         }
     }
 
