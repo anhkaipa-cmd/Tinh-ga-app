@@ -7,6 +7,15 @@
         android:label="Tính gà"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+        <provider
+            android:name=".EggExcelProvider"
+            android:authorities="com.anhthu.tinhga.excel"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+        <activity
+            android:name=".EggWeightActivity"
+            android:exported="false"
+            android:screenOrientation="portrait" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
