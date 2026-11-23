@@ -15,31 +15,31 @@ import java.util.zip.ZipOutputStream;
 
 public final class XlsxExporter {
     public static final class Record {
+        public final String incubationDate;
+        public final String hatchDate;
         public final String productionDate;
-        public final int machineNumber;
+        public final String machineId;
         public final String house;
         public final int ageWeeks;
         public final double top, middle, bottom;
-        public Record(String productionDate, int machineNumber, String house, int ageWeeks,
+        public Record(String incubationDate, String hatchDate, String productionDate,
+                      String machineId, String house, int ageWeeks,
                       double top, double middle, double bottom) {
-            this.productionDate = productionDate;
-            this.machineNumber = machineNumber;
-            this.house = house;
-            this.ageWeeks = ageWeeks;
-            this.top = top;
-            this.middle = middle;
-            this.bottom = bottom;
+            this.incubationDate=incubationDate;
+            this.hatchDate=hatchDate;
+            this.productionDate=productionDate;
+            this.machineId=machineId;
+            this.house=house;
+            this.ageWeeks=ageWeeks;
+            this.top=top;
+            this.middle=middle;
+            this.bottom=bottom;
         }
-        public Record(String productionDate, String house, int ageWeeks,
-                      double top, double middle, double bottom) {
-            this(productionDate, 1, house, ageWeeks, top, middle, bottom);
-        }
-        public double average() { return (top + middle + bottom) / 3.0; }
+        public double average() { return (top+middle+bottom)/3.0; }
     }
     private XlsxExporter() {}
 
-    public static void write(File target, String incubationDate, String hatchDate,
-                             int productionDays, int machineCount, List<Record> records) throws IOException {
+    public static void write(File target,int incubationDays,int machineCount,List<Record> records) throws IOException {
         if (records == null || records.isEmpty()) {
             throw new IOException("Chưa có dữ liệu cân trứng để xuất.");
         }
@@ -66,7 +66,7 @@ public final class XlsxExporter {
                 "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles\" Target=\"styles.xml\"/>" +
                 "</Relationships>");
             put(zip, "xl/styles.xml", styles());
-            put(zip, "xl/worksheets/sheet1.xml", worksheet(incubationDate, hatchDate, productionDays, machineCount, records));
+            put(zip, "xl/worksheets/sheet1.xml", worksheet(incubationDays,machineCount,records));
         }
     }
 
@@ -89,8 +89,7 @@ public final class XlsxExporter {
             "</cellXfs></styleSheet>";
     }
 
-    private static String worksheet(String incubationDate, String hatchDate,
-                                    int productionDays, int machineCount, List<Record> records) {
+    private static String worksheet(int incubationDays,int machineCount,List<Record> records) {
         StringBuilder xml = new StringBuilder(4096 + records.size() * 360);
         xml.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
         xml.append("<worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\">");
@@ -106,15 +105,13 @@ public final class XlsxExporter {
         str(xml, "A1", "BÁO CÁO CÂN TRỨNG", 2);
         xml.append("</row>");
         xml.append("<row r=\"2\">");
-        str(xml,"A2","Ngày ấp",2);
-        str(xml,"B2",incubationDate,0);
-        str(xml,"D2","Ngày ra gà (+21 ngày)",2);
-        str(xml,"E2",hatchDate,0);
+        str(xml,"A2","Số đợt ấp",2);
+        num(xml,"B2",incubationDays,0);
+        str(xml,"D2","Máy cân/đợt",2);
+        num(xml,"E2",machineCount,0);
         xml.append("</row><row r=\"3\">");
-        str(xml,"A3","Số ngày sản xuất",2);
-        num(xml,"B3",productionDays,0);
-        str(xml,"D3","Số máy cân",2);
-        num(xml,"E3",machineCount,0);
+        str(xml,"A3","Lưu ý",2);
+        str(xml,"B3","Ngày ấp, ngày ra gà và ngày SX riêng theo đợt",0);
         xml.append("</row>");
         xml.append("<row r=\"4\" ht=\"32\" customHeight=\"1\">");
         String[] heads = {"Ngày ấp","Ngày ra gà","Ngày sản xuất","Máy cân","Nhà","Tuần tuổi",
@@ -127,10 +124,10 @@ public final class XlsxExporter {
             Record r=records.get(i);
             int line=i+5;
             xml.append("<row r=\"").append(line).append("\">");
-            str(xml,"A"+line,incubationDate,0);
-            str(xml,"B"+line,hatchDate,0);
+            str(xml,"A"+line,r.incubationDate,0);
+            str(xml,"B"+line,r.hatchDate,0);
             str(xml,"C"+line,r.productionDate,0);
-            num(xml,"D"+line,r.machineNumber,0);
+            str(xml,"D"+line,r.machineId,0);
             str(xml,"E"+line,r.house,0);
             num(xml,"F"+line,r.ageWeeks,0);
             num(xml,"G"+line,r.top,3);
