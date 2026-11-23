@@ -46,7 +46,8 @@ public class EggExcelProvider extends ContentProvider {
         for(String col:requested) {
             if(OpenableColumns.DISPLAY_NAME.equals(col)) {
                 columns.add(col);
-                values.add("Can-trung.xlsx");
+                values.add(getContext().getSharedPreferences("tinh_ga_can_trung",0)
+                    .getString("last_excel_filename","wloss.xlsx"));
             } else if(OpenableColumns.SIZE.equals(col)) {
                 columns.add(col);
                 values.add(file.isFile()?file.length():0L);
