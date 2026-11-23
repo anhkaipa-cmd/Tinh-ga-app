@@ -443,7 +443,7 @@ public class EggWeightActivity extends Activity {
         boolean unique=distinct.size()==3;
         boolean allReady=validDate && validDays==3 && unique && !incomplete;
         exportButton.setEnabled(allReady);
-        exportButton.setAlpha(allReady?1f:0.5f);
+        exportButton.setVisibility(allReady?View.VISIBLE:View.GONE);
         exportButton.setBackground(round(allReady?BLUE:Color.rgb(137,155,181),12,BORDER));
         if(!validDate) overallStatus.setText("Cần chọn ngày ấp để xuất Excel.");
         else if(!unique && validDays==3) overallStatus.setText("3 ngày sản xuất phải khác nhau.");
