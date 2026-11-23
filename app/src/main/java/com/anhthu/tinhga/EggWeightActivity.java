@@ -303,6 +303,7 @@ public class EggWeightActivity extends Activity {
         long ms=store.getLong("production_"+day,0);
         date.setText(ms>0?"SX "+formatDate(ms):"Chọn ngày SX");
         long incubation=store.getLong("incubation_"+day,0);
+        long incub=store.getLong("incubation_"+day,0);
         heading.setText(incub>0?incubationHeading(incub):"CHỌN NGÀY ẤP");
         incubationInputs[day].setText(incub>0?formatDate(incub):"Chọn ngày ấp");
         hatchOutputs[day].setText(incub>0?formatDate(hatchMillis(incub)):"—");
