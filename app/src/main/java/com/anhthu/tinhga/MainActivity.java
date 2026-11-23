@@ -2,6 +2,7 @@ package com.anhthu.tinhga;
 
 import android.app.Activity;
 import android.content.SharedPreferences;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
@@ -90,7 +91,9 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
         root.addView(buildHeader());
-        root.addView(space(8));
+        root.addView(space(6));
+        root.addView(buildTabs());
+        root.addView(space(7));
         root.addView(buildPlanRow());
         root.addView(space(8));
         root.addView(buildTable());
@@ -140,6 +143,32 @@ public class MainActivity extends Activity {
         reset.setOnClickListener(v -> resetDailyData());
         header.addView(reset, new LinearLayout.LayoutParams(dp(68), dp(42)));
         return header;
+    }
+
+    private View buildTabs() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        Button doc = new Button(this);
+        doc.setText("TÍNH DOC");
+        doc.setTextSize(12);
+        doc.setAllCaps(false);
+        doc.setTypeface(Typeface.DEFAULT_BOLD);
+        doc.setTextColor(Color.WHITE);
+        doc.setBackground(rounded(NAVY, 12, NAVY, 1));
+        bar.addView(doc,new LinearLayout.LayoutParams(0,dp(38),1f));
+
+        Button weights = new Button(this);
+        weights.setText("CÂN TRỨNG");
+        weights.setTextSize(12);
+        weights.setAllCaps(false);
+        weights.setTypeface(Typeface.DEFAULT_BOLD);
+        weights.setTextColor(NAVY);
+        weights.setBackground(rounded(PALE_BLUE,12,BORDER,1));
+        weights.setOnClickListener(v -> startActivity(new Intent(this,EggWeightActivity.class)));
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0,dp(38),1f);
+        right.setMarginStart(dp(6));
+        bar.addView(weights,right);
+        return bar;
     }
 
     private View buildPlanRow() {
