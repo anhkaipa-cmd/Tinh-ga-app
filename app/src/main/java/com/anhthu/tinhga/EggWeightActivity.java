@@ -161,6 +161,18 @@ public class EggWeightActivity extends Activity {
         exportButton.setTypeface(Typeface.DEFAULT_BOLD);
         exportButton.setOnClickListener(v->sendExcel());
         root.addView(exportButton,new LinearLayout.LayoutParams(-1,dp(54)));
+
+        root.addView(space(9));
+        Button newWeighing=new Button(this);
+        newWeighing.setAllCaps(false);
+        newWeighing.setText("NHẬP LẦN MỚI – GIỮ MÁY & ĐÀN");
+        newWeighing.setTextSize(14);
+        newWeighing.setTypeface(Typeface.DEFAULT_BOLD);
+        newWeighing.setTextColor(NAVY);
+        newWeighing.setBackground(round(PALE,11,BORDER));
+        newWeighing.setOnClickListener(v->chooseClearWeights());
+        root.addView(newWeighing,new LinearLayout.LayoutParams(-1,dp(50)));
+        root.addView(label("Sau khi đã gửi/lưu Excel, chọn mục này để xóa Trên – Giữa – Dưới. Mã máy, mã nhà, tuần tuổi và ngày SX vẫn giữ để sửa lại.",12,GREY,false));
         return scroll;
     }
 
@@ -618,6 +630,65 @@ public class EggWeightActivity extends Activity {
         overallStatus.setTextColor(completed>=1?GREEN:NAVY);
     }
 
+    /** Explicitly clear only the measured weights; never delete machine or flock identifiers. */
+    private void chooseClearWeights() {
+        dismissKeyboard();
+        String[] labels=new String[3];
+        boolean[] selected=new boolean[3];
+        int lastMask=store.getInt("last_export_days_mask",0);
+        for(int day=0;day<3;day++) {
+            long incubation=store.getLong("incubation_"+day,0);
+            labels[day]=(incubation>0?incubationHeading(incubation):"Đợt "+(day+1))+
+                " • "+machineCounts[day]+" máy";
+            selected[day]=(lastMask & (1<<day)) != 0;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Chọn ngày ấp để nhập cân lần mới")
+            .setMultiChoiceItems(labels,selected,(dialog,index,checked)->selected[index]=checked)
+            .setNegativeButton("HỦY",null)
+            .setPositiveButton("TIẾP TỤC",(dialog,which)->{
+                int mask=0;
+                for(int day=0;day<3;day++) if(selected[day]) mask|=1<<day;
+                if(mask==0) {
+                    Toast.makeText(this,"Hãy chọn ít nhất một ngày ấp.",Toast.LENGTH_LONG).show();
+                    return;
+                }
+                final int toClear=mask;
+                new AlertDialog.Builder(this)
+                    .setTitle("Xóa các số cân?")
+                    .setMessage("Chỉ xóa trọng lượng TRÊN, GIỮA, DƯỚI của ngày đã chọn. " +
+                        "Giữ nguyên mã máy, mã nhà/đàn, tuần tuổi, ngày sản xuất và số máy. " +
+                        "Hãy chắc chắn đã gửi hoặc lưu Excel trước khi xóa.")
+                    .setNegativeButton("GIỮ NGUYÊN",null)
+                    .setPositiveButton("XÓA TRỌNG LƯỢNG",(confirmation,button)->clearWeights(toClear))
+                    .show();
+            })
+            .show();
+    }
+
+    private void clearWeights(int dayMask) {
+        SharedPreferences.Editor updates=store.edit();
+        for(int day=0;day<3;day++) {
+            if((dayMask&(1<<day))==0) continue;
+            for(WeightRow row:rows[day]) {
+                // The TextWatchers save the blank values immediately.
+                row.top.setText("");
+                row.middle.setText("");
+                row.bottom.setText("");
+                for(String key:new String[]{"top","middle","bottom"}) {
+                    updates.remove("entry_"+day+"_"+row.id+"_"+key);
+                }
+                updateAverage(row);
+            }
+        }
+        updates.remove("last_export_days_mask");
+        updates.apply();
+        refresh();
+        Toast.makeText(this,
+            "Đã xóa trọng lượng. Đã giữ máy, nhà/đàn, tuần tuổi và ngày sản xuất.",
+            Toast.LENGTH_LONG).show();
+    }
+
     private void sendExcel() {
         dismissKeyboard();
         boolean[] ready=completedDays();
@@ -671,6 +742,26 @@ public class EggWeightActivity extends Activity {
     }
 
     private void buildExcel(List<Integer> selectedDays,boolean saveToDevice) {
+        if(selectedDays==null || selectedDays.isEmpty()) return;
+        String weeklyName=null;
+        int selectedMask=0;
+        for(int day:selectedDays) {
+            selectedMask|=1<<day;
+            long incubation=store.getLong("incubation_"+day,0);
+            if(incubation<=0) return;
+            String candidate=WlossWeekName.forIncubationDate(incubation);
+            if(weeklyName!=null && !weeklyName.equals(candidate)) {
+                new AlertDialog.Builder(this)
+                    .setTitle("Các ngày ấp khác tuần")
+                    .setMessage("Để đặt đúng tên WLOSS theo tuần, hãy chọn các ngày ấp thuộc cùng một tuần Thứ 2–Chủ nhật.")
+                    .setPositiveButton("ĐÃ HIỂU",null)
+                    .show();
+                return;
+            }
+            weeklyName=candidate;
+        }
+        final String excelName=weeklyName;
+        final int exportedMask=selectedMask;
         ArrayList<XlsxExporter.Record> data=new ArrayList<>();
         for(int day:selectedDays) {
             long incub=store.getLong("incubation_"+day,0);
@@ -704,22 +795,29 @@ public class EggWeightActivity extends Activity {
                       .append(": ").append(machineCounts[day]);
             }
             XlsxExporter.write(file,selectedDays.size(),counts.toString(),data);
+            // Keep the internal temporary workbook name stable, but expose a weekly WLOSS
+            // filename to the Android share provider and the device Save As dialog.
+            store.edit().putString("last_excel_filename",excelName)
+                .putInt("last_export_days_mask",exportedMask).apply();
             if(saveToDevice) {
                 Intent save=new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 save.addCategory(Intent.CATEGORY_OPENABLE);
                 save.setType(EggExcelProvider.MIME);
-                save.putExtra(Intent.EXTRA_TITLE,"Can-trung.xlsx");
+                save.putExtra(Intent.EXTRA_TITLE,excelName);
                 startActivityForResult(save,REQUEST_SAVE_EXCEL);
             } else {
                 Intent send=new Intent(Intent.ACTION_SEND);
                 send.setType(EggExcelProvider.MIME);
-                send.putExtra(Intent.EXTRA_SUBJECT,"Báo cáo cân trứng");
+                send.putExtra(Intent.EXTRA_SUBJECT,excelName);
                 send.putExtra(Intent.EXTRA_STREAM,EggExcelProvider.SHARE_URI);
-                send.setClipData(ClipData.newRawUri("Can-trung.xlsx",EggExcelProvider.SHARE_URI));
+                send.setClipData(ClipData.newRawUri(excelName,EggExcelProvider.SHARE_URI));
                 send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 Intent chooser=Intent.createChooser(send,"Gửi Excel cân trứng");
                 chooser.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 startActivity(chooser);
+                Toast.makeText(this,
+                    "Đã tạo "+excelName+". Sau khi gửi, có thể chọn NHẬP LẦN MỚI.",
+                    Toast.LENGTH_LONG).show();
             }
         } catch(Exception e) {
             Toast.makeText(this,"Không xuất được Excel: "+e.getMessage(),Toast.LENGTH_LONG).show();
@@ -739,7 +837,14 @@ public class EggWeightActivity extends Activity {
             int n;
             while((n=input.read(buffer))!=-1) output.write(buffer,0,n);
             output.flush();
-            Toast.makeText(this,"Đã lưu file Can-trung.xlsx",Toast.LENGTH_LONG).show();
+            String savedName=store.getString("last_excel_filename","wloss.xlsx");
+            Toast.makeText(this,"Đã lưu file "+savedName,Toast.LENGTH_LONG).show();
+            new AlertDialog.Builder(this)
+                .setTitle("Đã lưu WLOSS")
+                .setMessage("File "+savedName+" đã lưu. Bạn có muốn xóa trọng lượng để cân lần sau, nhưng giữ mã máy và mã nhà/đàn?")
+                .setNegativeButton("GIỮ NGUYÊN",null)
+                .setPositiveButton("CHỌN NGÀY ĐỂ XÓA",(dialog,button)->chooseClearWeights())
+                .show();
         } catch(Exception e) {
             Toast.makeText(this,"Lưu Excel thất bại: "+e.getMessage(),Toast.LENGTH_LONG).show();
         }
