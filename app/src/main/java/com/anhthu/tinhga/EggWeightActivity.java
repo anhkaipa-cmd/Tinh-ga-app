@@ -494,19 +494,16 @@ public class EggWeightActivity extends Activity {
     private void updateAverage(WeightRow r) {
         if (r.average==null) return;
         double top=weight(r.top), middle=weight(r.middle), bottom=weight(r.bottom);
-        if(!Double.isNaN(top)&&!Double.isNaN(middle)&&!Double.isNaN(bottom)) {
-            r.average.setText("Trung bình: "+String.format(Locale.US,"%.2f", (top+middle+bottom)/3)+" g");
-        } else r.average.setText("Trung bình: —");
+        if(Double.isFinite(top) && Double.isFinite(middle) && Double.isFinite(bottom)) {
+            double average=(top+middle+bottom)/3.0;
+            r.average.setText("Trung bình: "+EggWeightValue.display(average)+" g");
+        } else {
+            r.average.setText("Trung bình: —");
+        }
     }
 
     private double weight(EditText v) {
-        if (v==null) return Double.NaN;
-        try {
-            String text=v.getText().toString().trim().replace(',','.');
-            if(text.isEmpty()) return Double.NaN;
-            double x=Double.parseDouble(text);
-            return (x>0 && x<=500 && !Double.isInfinite(x))?x:Double.NaN;
-        } catch(Exception e) { return Double.NaN; }
+        return v==null ? Double.NaN : EggWeightValue.parse(v.getText().toString());
     }
 
     private boolean containsData(WeightRow r) {
