@@ -755,17 +755,16 @@ public class EggWeightActivity extends Activity {
         final String excelName=weeklyName;
         final int exportedMask=selectedMask;
         ArrayList<XlsxExporter.Record> data=new ArrayList<>();
+        int[] exportedCounts=new int[3];
         for(int day:selectedDays) {
             long incub=store.getLong("incubation_"+day,0);
-            if(incub<=0 || rows[day].size()!=machineCounts[day]) {
-                Toast.makeText(this,"Số máy cân chưa khớp với dữ liệu.",Toast.LENGTH_LONG).show();
+            if(incub<=0) {
+                Toast.makeText(this,"Ngày ấp chưa hợp lệ.",Toast.LENGTH_LONG).show();
                 return;
             }
             for(WeightRow r:rows[day]) {
-                if(!complete(day,r)) {
-                    Toast.makeText(this,"Vẫn có máy cân thiếu ngày SX hoặc trọng lượng hợp lệ.",Toast.LENGTH_LONG).show();
-                    return;
-                }
+                if(!complete(day,r)) continue;
+                exportedCounts[day]++;
                 long machineProduction=store.getLong(machineDateKey(day,r.id),0);
                 data.add(new XlsxExporter.Record(
                     formatDate(incub),formatDate(hatchMillis(incub)),
@@ -776,6 +775,10 @@ public class EggWeightActivity extends Activity {
                     weight(r.top),weight(r.middle),weight(r.bottom)));
             }
         }
+        if(data.isEmpty()) {
+            Toast.makeText(this,"Không có máy cân đủ dữ liệu để xuất Excel.",Toast.LENGTH_LONG).show();
+            return;
+        }
         try {
             File dir=new File(getCacheDir(),"egg_exports");
             if(!dir.exists()&&!dir.mkdirs()) throw new IllegalStateException("Không tạo được thư mục.");
@@ -784,7 +787,8 @@ public class EggWeightActivity extends Activity {
             for(int day:selectedDays) {
                 if(counts.length()>0) counts.append(" | ");
                 counts.append(incubationHeading(store.getLong("incubation_"+day,0)))
-                      .append(": ").append(machineCounts[day]);
+                      .append(": ").append(exportedCounts[day])
+                      .append("/").append(machineCounts[day]);
             }
             XlsxExporter.write(file,selectedDays.size(),counts.toString(),data);
             // Keep the internal temporary workbook name stable, but expose a weekly WLOSS
