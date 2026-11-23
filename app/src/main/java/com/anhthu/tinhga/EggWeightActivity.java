@@ -587,47 +587,37 @@ public class EggWeightActivity extends Activity {
             !Double.isNaN(weight(r.bottom));
     }
 
-    private boolean[] completedDays() {
-        boolean[] ready=new boolean[3];
-        for(int day=0;day<3;day++) {
-            long incub=store.getLong("incubation_"+day,0);
-            if(incub<=0 || rows[day].size()!=machineCounts[day]) continue;
-            boolean valid=true;
-            for(WeightRow row:rows[day]) {
-                if(!complete(day,row)) { valid=false; break; }
-            }
-            ready[day]=valid;
-        }
-        return ready;
+    // Each completed machine can be exported, even if other machines remain blank.
+    private int completedMachineCount(int day) {
+        int count=0;
+        for(WeightRow row:rows[day]) if(complete(day,row)) count++;
+        return count;
     }
 
     private void refresh() {
         if(overallStatus==null||exportButton==null) return;
-        boolean[] ready=completedDays();
-        int completed=0;
+        int total=0;
+        int days=0;
         for(int day=0;day<3;day++) {
-            int filled=0;
-            for(WeightRow r:rows[day]) {
-                updateAverage(r);
-                if(complete(day,r)) filled++;
-            }
-            long incub=store.getLong("incubation_"+day,0);
-            if(ready[day]) completed++;
+            for(WeightRow row:rows[day]) updateAverage(row);
+            int count=completedMachineCount(day);
+            total+=count;
+            if(count>0) days++;
             if(dayStatusTexts[day]!=null) {
-                String state=ready[day]?"✓ Hoàn thành "+machineCounts[day]+" máy":
-                    "Đủ "+filled+"/"+machineCounts[day]+" máy • kiểm tra ngày SX, mã máy, nhà, tuổi và trọng lượng 5.000–18.000 g";
-                dayStatusTexts[day].setText(state);
-                dayStatusTexts[day].setTextColor(ready[day]?GREEN:GREY);
+                dayStatusTexts[day].setText(count==machineCounts[day]?
+                    "✓ Đã đủ "+count+" máy cân":
+                    "Đã nhập "+count+"/"+machineCounts[day]+" máy • có thể xuất máy đã đủ");
+                dayStatusTexts[day].setTextColor(count>0?GREEN:GREY);
             }
         }
-        // Keep the export action visible; give clear instructions if fewer than 2 days are complete.
         exportButton.setVisibility(View.VISIBLE);
         exportButton.setEnabled(true);
         exportButton.setBackground(round(BLUE,12,BORDER));
-        overallStatus.setText(completed>=1?
-            "✓ Hoàn thành "+completed+"/3 đợt ấp. Có thể GỬI hoặc LƯU Excel. Chọn 1–3 đợt đã đủ dữ liệu.":
-            "Đã hoàn thành 0/3 đợt. Nhập đủ dữ liệu ít nhất 1 đợt để GỬI/LƯU Excel.");
-        overallStatus.setTextColor(completed>=1?GREEN:NAVY);
+        overallStatus.setText(total>0?
+            "✓ Có "+total+" máy cân đủ dữ liệu trong "+days+
+                " đợt ấp. Có thể GỬI/LƯU Excel ngay; máy chưa đủ không xuất.":
+            "Chưa có máy cân đủ dữ liệu. Nhập mã máy, nhà, tuần tuổi, ngày SX và 3 trọng lượng hợp lệ.");
+        overallStatus.setTextColor(total>0?GREEN:NAVY);
     }
 
     /** Explicitly clear only the measured weights; never delete machine or flock identifiers. */
