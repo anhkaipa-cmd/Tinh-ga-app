@@ -43,6 +43,21 @@ public class ExcelSmokeTest {
                 "26/11: 2 | 27/11: 1","V2","V3","<f>(G5+H5+I5)/3</f>");
             if(count(xml,"<row r=")!=7) throw new AssertionError("Wrong row count: "+count(xml,"<row r="));
 
+            // Partial-day export: two completed machines from eight planned machines.
+            // Unfinished machines must not become empty Excel rows.
+            List<XlsxExporter.Record> partial=Arrays.asList(
+                new XlsxExporter.Record("26/11/2026","17/12/2026",
+                    "11/11/2026","3","V2",33,11200,11300,11400),
+                new XlsxExporter.Record("26/11/2026","17/12/2026",
+                    "15/11/2026","4","V2",33,12000,12100,12200)
+            );
+            XlsxExporter.write(file,1,"THỨ 5: 2/8",partial);
+            xml=readXml(file);
+            expect(xml,"THỨ 5: 2/8","11/11/2026","15/11/2026",
+                "<v>11300.00</v>","<f>(G6+H6+I6)/3</f>");
+            if(count(xml,"<row r=")!=6)
+                throw new AssertionError("Partial export should have 4 heading + 2 machine rows");
+            
             // Three incubation dates Thursday 8, Friday 8, Saturday 5 weighings.
             List<XlsxExporter.Record> three=new ArrayList<>();
             int[] machineCounts={8,8,5};
