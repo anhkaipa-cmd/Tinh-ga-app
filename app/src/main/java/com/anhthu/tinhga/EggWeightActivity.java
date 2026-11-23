@@ -155,7 +155,7 @@ public class EggWeightActivity extends Activity {
 
         exportButton=new Button(this);
         exportButton.setAllCaps(false);
-        exportButton.setText("GỬI EXCEL CÂN TRỨNG");
+        exportButton.setText("XUẤT EXCEL – MÁY ĐÃ NHẬP");
         exportButton.setTextColor(Color.WHITE);
         exportButton.setTextSize(16);
         exportButton.setTypeface(Typeface.DEFAULT_BOLD);
@@ -646,7 +646,7 @@ public class EggWeightActivity extends Activity {
                 final int toClear=mask;
                 new AlertDialog.Builder(this)
                     .setTitle("Xóa các số cân?")
-                    .setMessage("Chỉ xóa trọng lượng TRÊN, GIỮA, DƯỚI của ngày đã chọn. " +
+                    .setMessage("Chỉ xóa trọng lượng TRÊN, GIỮA, DƯỚI của các máy đã nhập đủ trong ngày đã chọn. Máy chưa nhập đủ sẽ giữ nguyên. " +
                         "Giữ nguyên mã máy, mã nhà/đàn, tuần tuổi, ngày sản xuất và số máy. " +
                         "Hãy chắc chắn đã gửi hoặc lưu Excel trước khi xóa.")
                     .setNegativeButton("GIỮ NGUYÊN",null)
@@ -661,6 +661,8 @@ public class EggWeightActivity extends Activity {
         for(int day=0;day<3;day++) {
             if((dayMask&(1<<day))==0) continue;
             for(WeightRow row:rows[day]) {
+                // Never clear unfinished entries that were not included in export.
+                if(!complete(day,row)) continue;
                 // The TextWatchers save the blank values immediately.
                 row.top.setText("");
                 row.middle.setText("");
