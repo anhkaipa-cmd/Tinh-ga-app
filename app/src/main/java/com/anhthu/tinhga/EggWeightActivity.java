@@ -681,20 +681,21 @@ public class EggWeightActivity extends Activity {
 
     private void sendExcel() {
         dismissKeyboard();
-        boolean[] ready=completedDays();
         ArrayList<Integer> available=new ArrayList<>();
         ArrayList<String> labels=new ArrayList<>();
         for(int day=0;day<3;day++) {
-            if(ready[day]) {
+            int count=completedMachineCount(day);
+            if(count>0) {
                 available.add(day);
                 long incub=store.getLong("incubation_"+day,0);
-                labels.add(incubationHeading(incub)+" • "+machineCounts[day]+" máy cân");
+                labels.add(incubationHeading(incub)+
+                    " • "+count+"/"+machineCounts[day]+" máy đủ");
             }
         }
         if(available.isEmpty()) {
             new AlertDialog.Builder(this)
-                .setTitle("Chưa có đợt ấp hoàn chỉnh")
-                .setMessage("Mỗi máy cân cần đủ mã máy, mã nhà, tuần tuổi, ngày sản xuất và trọng lượng Trên – Giữa – Dưới từ 5.000–18.000 g. Hoàn thành ít nhất một đợt để xuất.")
+                .setTitle("Chưa có máy cân đủ dữ liệu")
+                .setMessage("Mỗi máy cần mã máy, mã nhà, tuần tuổi, ngày sản xuất và cân Trên – Giữa – Dưới (5.000–18.000 g). Có thể xuất riêng các máy đã hoàn chỉnh, không cần nhập toàn bộ số máy đã chọn.")
                 .setPositiveButton("ĐÃ HIỂU",null)
                 .show();
             return;
@@ -702,22 +703,23 @@ public class EggWeightActivity extends Activity {
         boolean[] selected=new boolean[available.size()];
         java.util.Arrays.fill(selected,true);
         new AlertDialog.Builder(this)
-            .setTitle("Chọn ngày ấp để xuất Excel")
+            .setTitle("Chọn đợt ấp để xuất WLOSS")
+            .setMessage("Chỉ các máy đã nhập đủ dữ liệu được đưa vào Excel. Các máy còn trống vẫn lưu trong ứng dụng.")
             .setMultiChoiceItems(labels.toArray(new String[0]),selected,
-                (dlg,idx,checked)->selected[idx]=checked)
+                (dialog,index,checked)->selected[index]=checked)
             .setNegativeButton("HỦY",null)
-            .setNeutralButton("LƯU EXCEL",(dlg,button)->{
+            .setNeutralButton("LƯU EXCEL",(dialog,button)->{
                 ArrayList<Integer> days=selectedDays(available,selected);
                 if(days.isEmpty()) {
-                    Toast.makeText(this,"Chọn ít nhất một ngày ấp.",Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,"Hãy chọn ít nhất một đợt ấp.",Toast.LENGTH_LONG).show();
                     return;
                 }
                 buildExcel(days,true);
             })
-            .setPositiveButton("GỬI EXCEL",(dlg,button)->{
+            .setPositiveButton("GỬI EXCEL",(dialog,button)->{
                 ArrayList<Integer> days=selectedDays(available,selected);
                 if(days.isEmpty()) {
-                    Toast.makeText(this,"Chọn ít nhất một ngày ấp.",Toast.LENGTH_LONG).show();
+                    Toast.makeText(this,"Hãy chọn ít nhất một đợt ấp.",Toast.LENGTH_LONG).show();
                     return;
                 }
                 buildExcel(days,false);
