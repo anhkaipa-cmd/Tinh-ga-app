@@ -90,6 +90,12 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setBackgroundColor(Color.rgb(248, 251, 255));
+        // Leave the system status bar and gesture navigation areas unobstructed.
+        screen.setOnApplyWindowInsetsListener((view, insets) -> {
+            view.setPadding(0, insets.getSystemWindowInsetTop(), 0,
+                    insets.getSystemWindowInsetBottom());
+            return insets;
+        });
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -98,8 +104,6 @@ public class MainActivity extends Activity {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT));
 
-        root.addView(buildHeader());
-        root.addView(space(6));
         root.addView(buildTabs());
         root.addView(space(7));
         root.addView(buildPlanRow());
@@ -107,8 +111,6 @@ public class MainActivity extends Activity {
         root.addView(buildTable());
         root.addView(space(8));
         root.addView(buildDifferences());
-        root.addView(space(8));
-        root.addView(buildCalculateButton());
 
         screen.addView(scroll, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
@@ -120,42 +122,11 @@ public class MainActivity extends Activity {
         return screen;
     }
 
-    private View buildHeader() {
-        LinearLayout header = new LinearLayout(this);
-        header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(2), dp(2), dp(2), dp(2));
-
-        ImageView icon = new ImageView(this);
-        icon.setImageResource(R.drawable.ic_chick);
-        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        header.addView(icon, new LinearLayout.LayoutParams(dp(58), dp(58)));
-
-        LinearLayout titleBox = new LinearLayout(this);
-        titleBox.setOrientation(LinearLayout.VERTICAL);
-        titleBox.setPadding(dp(10), 0, 0, 0);
-        header.addView(titleBox, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        titleBox.addView(text("Tính gà", 27, NAVY, true));
-        titleBox.addView(text("Tính nhanh số gà nở", 13, MUTED, false));
-
-        Button reset = new Button(this);
-        reset.setText("XÓA");
-        reset.setAllCaps(false);
-        reset.setTextSize(12);
-        reset.setTextColor(NAVY);
-        reset.setTypeface(Typeface.DEFAULT_BOLD);
-        reset.setPadding(dp(8), 0, dp(8), 0);
-        reset.setBackground(rounded(Color.WHITE, 13, BORDER, 1));
-        reset.setOnClickListener(v -> resetDailyData());
-        header.addView(reset, new LinearLayout.LayoutParams(dp(68), dp(42)));
-        return header;
-    }
-
     private View buildTabs() {
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setGravity(Gravity.CENTER_VERTICAL);
+
         Button doc = new Button(this);
         doc.setText("TÍNH DOC");
         doc.setTextSize(12);
@@ -163,7 +134,7 @@ public class MainActivity extends Activity {
         doc.setTypeface(Typeface.DEFAULT_BOLD);
         doc.setTextColor(Color.WHITE);
         doc.setBackground(rounded(NAVY, 12, NAVY, 1));
-        bar.addView(doc,new LinearLayout.LayoutParams(0,dp(38),1f));
+        bar.addView(doc, new LinearLayout.LayoutParams(0, dp(38), 1f));
 
         Button weights = new Button(this);
         weights.setText("CÂN TRỨNG");
@@ -171,11 +142,26 @@ public class MainActivity extends Activity {
         weights.setAllCaps(false);
         weights.setTypeface(Typeface.DEFAULT_BOLD);
         weights.setTextColor(NAVY);
-        weights.setBackground(rounded(PALE_BLUE,12,BORDER,1));
-        weights.setOnClickListener(v -> startActivity(new Intent(this,EggWeightActivity.class)));
-        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0,dp(38),1f);
+        weights.setBackground(rounded(PALE_BLUE, 12, BORDER, 1));
+        weights.setOnClickListener(v -> startActivity(new Intent(this, EggWeightActivity.class)));
+        LinearLayout.LayoutParams right = new LinearLayout.LayoutParams(0, dp(38), 1f);
         right.setMarginStart(dp(6));
-        bar.addView(weights,right);
+        bar.addView(weights, right);
+
+        // Retain the useful clear action without occupying a full header row.
+        Button clear = new Button(this);
+        clear.setText("XÓA");
+        clear.setContentDescription("Xóa số lượng và kế hoạch hôm nay");
+        clear.setAllCaps(false);
+        clear.setTextSize(10);
+        clear.setTextColor(NAVY);
+        clear.setTypeface(Typeface.DEFAULT_BOLD);
+        clear.setPadding(0, 0, 0, 0);
+        clear.setBackground(rounded(Color.WHITE, 10, BORDER, 1));
+        clear.setOnClickListener(v -> resetDailyData());
+        LinearLayout.LayoutParams clearParams = new LinearLayout.LayoutParams(dp(46), dp(38));
+        clearParams.setMarginStart(dp(6));
+        bar.addView(clear, clearParams);
         return bar;
     }
 
@@ -503,23 +489,6 @@ public class MainActivity extends Activity {
         view.setPadding(dp(6), dp(4), dp(6), dp(4));
         view.setBackground(rounded(Color.WHITE, 15, BORDER, 1));
         return view;
-    }
-
-    private View buildCalculateButton() {
-        Button calculate = new Button(this);
-        calculate.setText("TÍNH DOC");
-        calculate.setAllCaps(false);
-        calculate.setTextColor(Color.WHITE);
-        calculate.setTextSize(20);
-        calculate.setTypeface(Typeface.DEFAULT_BOLD);
-        calculate.setBackground(rounded(BLUE, 17, Color.TRANSPARENT, 0));
-        calculate.setOnClickListener(v -> {
-            normalizeAllCalculationFields();
-            recalculate();
-        });
-        calculate.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
-        return calculate;
     }
 
     private LinearLayout buildOperatorBar() {
