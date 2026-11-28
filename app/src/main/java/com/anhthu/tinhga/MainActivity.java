@@ -38,19 +38,25 @@ public class MainActivity extends Activity {
     private static final int ROW_SELECTED = Color.rgb(240, 248, 255);
     private static final int WARNING = Color.rgb(211, 92, 34);
 
-    private final String[] defaultFlocks = {"B1", "B4", "B5", "V1", "V6"};
-    private final String[] defaultRates = {"73.5", "83.0", "85.5", "90.5", "91.0"};
+    private static final int MAX_FLOCK_ROWS = 10;
+    private static final int DEFAULT_FLOCK_ROWS = 6;
+    private final String[] defaultFlocks = {"B1", "B4", "B5", "V1", "V6", "", "", "", "", ""};
+    private final String[] defaultRates = {"73.5", "83.0", "85.5", "90.5", "91.0", "", "", "", "", ""};
 
     private SharedPreferences prefs;
     private EditText plannedEggsInput;
     private EditText plannedDocInput;
-    private final CheckBox[] selected = new CheckBox[5];
-    private final EditText[] flockInputs = new EditText[5];
-    private final EditText[] qtyInputs = new EditText[5];
-    private final EditText[] rateInputs = new EditText[5];
-    private final TextView[] docOutputs = new TextView[5];
-    private final LinearLayout[] rowLayouts = new LinearLayout[5];
-    private final boolean[] qtyAuto = new boolean[5];
+    private final CheckBox[] selected = new CheckBox[MAX_FLOCK_ROWS];
+    private final EditText[] flockInputs = new EditText[MAX_FLOCK_ROWS];
+    private final EditText[] qtyInputs = new EditText[MAX_FLOCK_ROWS];
+    private final EditText[] rateInputs = new EditText[MAX_FLOCK_ROWS];
+    private final TextView[] docOutputs = new TextView[MAX_FLOCK_ROWS];
+    private final LinearLayout[] rowLayouts = new LinearLayout[MAX_FLOCK_ROWS];
+    private final boolean[] qtyAuto = new boolean[MAX_FLOCK_ROWS];
+    private int visibleFlockRows = DEFAULT_FLOCK_ROWS;
+    private TextView flockRowCountLabel;
+    private TextView addFlockControl;
+    private TextView removeFlockControl;
 
     private TextView totalEggsView;
     private TextView totalRateView;
@@ -70,6 +76,8 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
 
         prefs = getSharedPreferences("tinh_ga_prefs", MODE_PRIVATE);
+        visibleFlockRows = Math.max(1, Math.min(MAX_FLOCK_ROWS,
+                prefs.getInt("doc_flock_row_count", DEFAULT_FLOCK_ROWS)));
         setContentView(buildScreen());
         recalculate();
     }
@@ -248,7 +256,7 @@ public class MainActivity extends Activity {
         table.addView(header, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < MAX_FLOCK_ROWS; i++) {
             final int rowIndex = i;
 
             LinearLayout row = new LinearLayout(this);
@@ -359,6 +367,7 @@ public class MainActivity extends Activity {
             docOutputs[i] = doc;
             row.addView(doc, weighted(1.42f, dp(50)));
 
+            row.setVisibility(i < visibleFlockRows ? View.VISIBLE : View.GONE);
             table.addView(row, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, dp(56)));
         }
@@ -382,7 +391,92 @@ public class MainActivity extends Activity {
 
         table.addView(total, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(58)));
+        table.addView(buildFlockRowControls(), new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(30)));
         return table;
+    }
+
+    /** Compact +/- controls below the total row, without widening existing columns. */
+    private View buildFlockRowControls() {
+        LinearLayout bar = new LinearLayout(this);
+        bar.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        bar.setOrientation(LinearLayout.HORIZONTAL);
+        bar.setPadding(dp(4), 0, dp(4), 0);
+
+        flockRowCountLabel = text(visibleFlockRows + " nhà", 11, MUTED, false);
+        flockRowCountLabel.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(26));
+        labelParams.setMarginEnd(dp(9));
+        bar.addView(flockRowCountLabel, labelParams);
+
+        removeFlockControl = compactFlockControl("−");
+        removeFlockControl.setContentDescription("Bớt một nhà");
+        removeFlockControl.setOnClickListener(v -> changeFlockRowCount(-1));
+        LinearLayout.LayoutParams minusParams = new LinearLayout.LayoutParams(dp(33), dp(26));
+        minusParams.setMarginEnd(dp(6));
+        bar.addView(removeFlockControl, minusParams);
+
+        addFlockControl = compactFlockControl("+");
+        addFlockControl.setContentDescription("Thêm một nhà");
+        addFlockControl.setOnClickListener(v -> changeFlockRowCount(1));
+        bar.addView(addFlockControl, new LinearLayout.LayoutParams(dp(33), dp(26)));
+
+        updateFlockRowControls();
+        return bar;
+    }
+
+    private TextView compactFlockControl(String sign) {
+        TextView control = text(sign, 17, NAVY, true);
+        control.setGravity(Gravity.CENTER);
+        control.setClickable(true);
+        control.setFocusable(true);
+        control.setBackground(rounded(PALE_BLUE, 8, BORDER, 1));
+        return control;
+    }
+
+    private void updateFlockRowControls() {
+        if(flockRowCountLabel!=null) flockRowCountLabel.setText(visibleFlockRows + " nhà");
+        if(removeFlockControl!=null) {
+            boolean canRemove = visibleFlockRows > 1;
+            removeFlockControl.setEnabled(canRemove);
+            removeFlockControl.setAlpha(canRemove ? 1f : 0.4f);
+        }
+        if(addFlockControl!=null) {
+            boolean canAdd = visibleFlockRows < MAX_FLOCK_ROWS;
+            addFlockControl.setEnabled(canAdd);
+            addFlockControl.setAlpha(canAdd ? 1f : 0.4f);
+        }
+    }
+
+    private void changeFlockRowCount(int change) {
+        int next = Math.max(1, Math.min(MAX_FLOCK_ROWS, visibleFlockRows + change));
+        if(next==visibleFlockRows) return;
+
+        if(change<0) {
+            int removedIndex = visibleFlockRows - 1;
+            // Hide only the last row and remove its quantity from the current total.
+            // Its user-edited flock name and hatchability rate remain saved.
+            internalChange = true;
+            selected[removedIndex].setChecked(false);
+            qtyInputs[removedIndex].setText("");
+            qtyAuto[removedIndex] = false;
+            internalChange = false;
+            if(activeCalcField == qtyInputs[removedIndex] ||
+               activeCalcField == rateInputs[removedIndex]) {
+                activeCalcField = null;
+                qtyInputs[removedIndex].clearFocus();
+                rateInputs[removedIndex].clearFocus();
+            }
+        }
+
+        visibleFlockRows=next;
+        for(int i=0;i<MAX_FLOCK_ROWS;i++) {
+            rowLayouts[i].setVisibility(i < visibleFlockRows ? View.VISIBLE : View.GONE);
+        }
+        prefs.edit().putInt("doc_flock_row_count", visibleFlockRows).apply();
+        updateFlockRowControls();
+        recalculate();
     }
 
     private View buildDifferences() {
@@ -510,7 +604,7 @@ public class MainActivity extends Activity {
         long enteredSum = 0;
         boolean allOtherValuesValid = true;
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             if (!selected[i].isChecked()) continue;
             String raw = qtyInputs[i].getText().toString().trim();
             if (raw.isEmpty()) {
@@ -542,7 +636,7 @@ public class MainActivity extends Activity {
         long plannedDoc = hasPlannedDoc ? evaluateInteger(plannedDocInput) : 0;
 
         internalChange = true;
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             if (qtyAuto[i] && !qtyInputs[i].hasFocus()) {
                 qtyInputs[i].setText("");
                 qtyAuto[i] = false;
@@ -555,7 +649,7 @@ public class MainActivity extends Activity {
         long enteredSum = 0;
         boolean allEnteredValid = true;
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             if (selected[i] == null || !selected[i].isChecked()) continue;
             String raw = qtyInputs[i].getText().toString().trim();
             if (raw.isEmpty()) {
@@ -580,7 +674,7 @@ public class MainActivity extends Activity {
         long totalDoc = 0;
         double weightedRateNumerator = 0.0;
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             if (selected[i] == null || !selected[i].isChecked()) {
                 docOutputs[i].setText("—");
                 continue;
@@ -626,7 +720,7 @@ public class MainActivity extends Activity {
     private void normalizeAllCalculationFields() {
         normalizeIntegerExpression(plannedEggsInput);
         normalizeIntegerExpression(plannedDocInput);
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             normalizeIntegerExpression(qtyInputs[i]);
             normalizeRateExpression(rateInputs[i]);
         }
@@ -707,7 +801,7 @@ public class MainActivity extends Activity {
     }
 
     private void updateRowHighlights() {
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             if (rowLayouts[i] == null || selected[i] == null) continue;
             boolean on = selected[i].isChecked();
             rowLayouts[i].setBackground(
@@ -738,7 +832,7 @@ public class MainActivity extends Activity {
         plannedEggsInput.setText("");
         plannedDocInput.setText("");
 
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < visibleFlockRows; i++) {
             qtyInputs[i].setText("");
             qtyAuto[i] = false;
             selected[i].setChecked(false);
